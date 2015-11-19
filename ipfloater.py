@@ -203,42 +203,72 @@ class EndpointManager():
         
         return True
     
-    def _add_redirection(self, private_ip, private_port, public_ip, public_port):
-        ep = Endpoint(public_ip, public_port, private_ip, private_port)
-        return self._add_ep(ep)
-    
-    def request_endpoint(self, private_ip, private_port, public_port = -1):
-        ep = self._select_public_ip(private_ip, private_port, public_port)
-        return ep
-
-    def _private_available(self, ep):
-        if ep.private_ip in self._private2public:
-            p_ip_data = self._private2public[ep.private_ip]
-            if 0 in p_ip_data:
-                return False
-            if ep.private_port in p_ip_data:
-                return False
-        return True
-    
-    def _public_available(self, ep):
-        if ep.public_ip not in self._private2public:
-            return False
-        p_ip_data = self._public2private[ep.public_ip]
-        if 0 in p_ip_data:
+    def _remove_ep(self, endpoint):
+        if endpoint is None:
             return False
         
-        if ep.public_port in p_ip_data:
-            return False
+        if endpoint.private_ip not in self._private2public: return False
+        if endpoint.private_port not in self._private2public[endpoint.private_ip]: return False
+        if endpoint.public_ip not in self._public2private: return False
+        if endpoint.public_port not in self._public2private[endpoint.public_ip]: return False
+        
+        del (self._public2private[endpoint.public_ip])[public_port]
+        del (self._private2public[endpoint.private_ip])[private_port]
+        if len(self._private2public[endpoint.private_ip]) == 0:
+            del self._private2public[endpoint.private_ip]
+            
         return True
+
+    def _get_ep_from_private(self, private_ip, private_port):
+        if private_ip not in self._private2public:
+            return None
+        
+        if private_port not in self._private2public[private_ip]:
+            return None
+        
+        return (self._private2public[private_ip])[private_port]
+
+    def _get_ep_from_public(self, public_ip, public_port):
+        if public_ip not in self._public2private:
+            return None
+        
+        if public_port not in self._public2private[public_ip]:
+            return None
+        
+        return (self._public2private[public_ip])[public_port]
+    
+    #def request_endpoint(self, private_ip, private_port, public_port = -1):
+    #    ep = self._select_public_ip(private_ip, private_port, public_port)
+    #    return ep
+    #def _private_available(self, ep):
+    #    if ep.private_ip in self._private2public:
+    #        p_ip_data = self._private2public[ep.private_ip]
+    #        if 0 in p_ip_data:
+    #            return False
+    #        if ep.private_port in p_ip_data:
+    #            return False
+    #    return True
+    #
+    #def _public_available(self, ep):
+    #    if ep.public_ip not in self._private2public:
+    #        return False
+    #    p_ip_data = self._public2private[ep.public_ip]
+    #    if 0 in p_ip_data:
+    #        return False
+    #    
+    #    if ep.public_port in p_ip_data:
+    #        return False
+    #    return True
 
     def apply_endpoint(self, ep):
         # Will check if it is possible to apply (i.e. the ips and ports are available)
         occupied = False
-        if not self._private_available(ep):
+        
+        if self._get_ep_from_private(ep.private_ip, ep.private_port) is not None:
             _LOGGER.warning("tried to apply a redirection to %s:%d but it is already occupied" % (ep.private_ip, ep.private_port))
             return False            
 
-        if not self._public_available(ep):
+        if self._get_ep_from_public(ep.public_ip, ep.public_port) is not None:
             _LOGGER.warning("tried to apply a redirection from %s:%d but it is either occupied or the ip is not managed by ipfloater" % (ep.public_ip, ep.public_port))
             return False
         
@@ -247,11 +277,57 @@ class EndpointManager():
         self._add_ep(ep)
         return True        
     
-    def terminate_endpoint(self, private_ip, private_port):
-        pass
+    #def _remove_from_public(self, public_ip, public_port):
+    #    if public_ip not in self._public2private:
+    #        return None
+    #    
+    #    if public_port not in self._public2private[public_ip]:
+    #        return None
+    #    
+    #    ep = (self._public2private[public_ip])[public_port]
+    #    del (self._public2private[public_ip])[public_port]
+    #    
+    #    return ep
+    #
+    #def _remove_from_private(self, private_ip, private_port):
+    #    if private_ip not in self._private2public:
+    #        return None
+    #    
+    #    if private_port not in self._private2public[private_ip]:
+    #        return None
+    #    
+    #    ep = (self._private2public[private_ip])[private_port]
+    #    del (self._private2public[private_ip])[private_port]
+    #    if len(self._private2public[private_ip]) == 0:
+    #        del self._private2public[private_ip]
+    #        
+    #    return ep
     
-    def terminate_endpoints(self, private_ip):
-        pass
+    def terminate_redirection(self, private_ip, private_port):
+        ep = self._get_ep_from_private(private_ip, private_port)
+        if ep is None:
+            return False
+        
+        return self._remove_ep(ep)        
+
+    def _remove_eps_from_list(self, ep_list):
+        ep_list = [ ep for _,ep in ep_list.items() ]
+        error = False
+        for ep in ep_list:
+            if not self._remove_ep(ep):
+                error = True
+                _LOGGER.error("failed to remove endpoint: %s" % ep)
+        return (not error)
+    
+    def clean_private_ip(self, private_ip):
+        if private_ip not in self._private2public:
+            return True
+        return _remove_eps_from_list(self._private2public[private_ip])
+    
+    def clean_public_ip(self, public_ip):
+        if public_ip not in self._public2private:
+            return False
+        return _remove_eps_from_list(self._public2private[public_ip])
     
 
 def query_endpoint(dst_ip, dst_port, register = True):
