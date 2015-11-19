@@ -211,21 +211,37 @@ class EndpointManager():
         ep = self._select_public_ip(private_ip, private_port, public_port)
         return ep
 
+    def _private_available(self, ep):
+        if ep.private_ip in self._private2public:
+            p_ip_data = self._private2public[ep.private_ip]
+            if 0 in p_ip_data:
+                return False
+            if ep.private_port in p_ip_data:
+                return False
+        return True
+    
+    def _public_available(self, ep):
+        if ep.public_ip not in self._private2public:
+            return False
+        p_ip_data = self._public2private[ep.public_ip]
+        if 0 in p_ip_data:
+            return False
+        
+        if ep.public_port in p_ip_data:
+            return False
+        return True
+
     def apply_endpoint(self, ep):
         # Will check if it is possible to apply (i.e. the ips and ports are available)
         occupied = False
-        if ep.private_ip in self._private2public:
-            if ep.private_port in self._private2public[ep.private_ip]:
-                _LOGGER.warning("tried to apply a redirection to %s:%d but it is already occupied" % (ep.private_ip, ep.private_port))
-                return False
-        if ep.public_ip not in self._public2private:
-            _LOGGER.warning("tried to apply a redirection from an unkonwn public ip: %s" % ep.public_ip)
+        if not self._private_available(ep):
+            _LOGGER.warning("tried to apply a redirection to %s:%d but it is already occupied" % (ep.private_ip, ep.private_port))
+            return False            
+
+        if not self._public_available(ep):
+            _LOGGER.warning("tried to apply a redirection from %s:%d but it is either occupied or the ip is not managed by ipfloater" % (ep.public_ip, ep.public_port))
             return False
         
-        if ep.public_port in self._public2private[ep.public_ip]:
-            _LOGGER.warning("tried to apply a redirection from %s:%d but it is already occupied" % (ep.public_ip, ep.public_port))
-            return False
-
         # TODO: apply on iptables
         
         self._add_ep(ep)
