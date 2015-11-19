@@ -56,6 +56,12 @@ class Endpoint(object):
         self.private_ip = private_ip
         self.private_port = private_port
 
+    def iptables_apply(self):
+        return False
+    
+    def iptables_remove(self):
+        return False
+
     def ipt(self, new = False):
         head = "\
 iptables -t nat -N rule-%d-OUTPUT\n\
@@ -80,7 +86,7 @@ iptables -t nat -X rule-%d-POSTROUTING\
             action = "-D"
             head = ""
             
-            
+        # solucion de nat loopback: en postrouting, si el source es la LAN y el destino es     
         # iptables -t nat -A rule-0-POSTROUTING -s 10.3.0.5/24 -d 10.3.0.5/32 -p tcp --dport 22 -j SNAT --to-source 10.0.0.69
         
         if (self.public_port == 0) and (self.private_port == 0):
@@ -201,10 +207,29 @@ class EndpointManager():
         ep = Endpoint(public_ip, public_port, private_ip, private_port)
         return self._add_ep(ep)
     
-    def query_endpoint(self, private_ip, private_port, public_port = -1):
+    def request_endpoint(self, private_ip, private_port, public_port = -1):
         ep = self._select_public_ip(private_ip, private_port, public_port)
-        self._add_ep(ep)
         return ep
+
+    def apply_endpoint(self, ep):
+        # Will check if it is possible to apply (i.e. the ips and ports are available)
+        occupied = False
+        if ep.private_ip in self._private2public:
+            if ep.private_port in self._private2public[ep.private_ip]:
+                _LOGGER.warning("tried to apply a redirection to %s:%d but it is already occupied" % (ep.private_ip, ep.private_port))
+                return False
+        if ep.public_ip not in self._public2private:
+            _LOGGER.warning("tried to apply a redirection from an unkonwn public ip: %s" % ep.public_ip)
+            return False
+        
+        if ep.public_port in self._public2private[ep.public_ip]:
+            _LOGGER.warning("tried to apply a redirection from %s:%d but it is already occupied" % (ep.public_ip, ep.public_port))
+            return False
+
+        # TODO: apply on iptables
+        
+        self._add_ep(ep)
+        return True        
     
     def terminate_endpoint(self, private_ip, private_port):
         pass
@@ -234,8 +259,8 @@ if __name__ == '__main__':
     epm.add_public_ip("10.0.0.72")
     epm.add_public_ip("10.0.0.69")
 
-    print (epm.query_endpoint("10.3.0.5", 22)).ipt()
-    print (epm.query_endpoint("10.3.0.7", 0)).ipt()
+    print (epm.request_endpoint("10.3.0.5", 22)).ipt()
+    print (epm.request_endpoint("10.3.0.7", 0)).ipt()
     
     #print (epm.query_endpoint("192.168.1.1", 0)).ipt()
     #print (epm.query_endpoint("192.168.1.2", 1)).ipt()
