@@ -7,37 +7,14 @@ import cpyutils.xmlrpcutils as xmlrpcutils
 import logging
 import random
 import iptc
-
+import uuid
 
 '''
--P PREROUTING ACCEPT
--P POSTROUTING ACCEPT
--P OUTPUT ACCEPT
--N quantum-l3-agent-OUTPUT
--N quantum-l3-agent-POSTROUTING
--N quantum-l3-agent-PREROUTING
--N quantum-l3-agent-float-snat
--N quantum-l3-agent-snat
--N quantum-postrouting-bottom
--A PREROUTING -j quantum-l3-agent-PREROUTING 
--A POSTROUTING -j quantum-l3-agent-POSTROUTING 
--A POSTROUTING -j quantum-postrouting-bottom 
--A OUTPUT -j quantum-l3-agent-OUTPUT 
--A quantum-l3-agent-OUTPUT -d 172.24.4.228/32 -j DNAT --to-destination 10.1.0.2 
--A quantum-l3-agent-POSTROUTING ! -i qg-d48b49e0-aa ! -o qg-d48b49e0-aa -m conntrack ! --ctstate DNAT -j ACCEPT 
--A quantum-l3-agent-PREROUTING -d 169.254.169.254/32 -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 9697 
--A quantum-l3-agent-PREROUTING -d 172.24.4.228/32 -j DNAT --to-destination 10.1.0.2 
--A quantum-l3-agent-float-snat -s 10.1.0.2/32 -j SNAT --to-source 172.24.4.228 
--A quantum-l3-agent-snat -j quantum-l3-agent-float-snat 
--A quantum-l3-agent-snat -s 10.1.0.0/24 -j SNAT --to-source 172.24.4.227 
--A quantum-postrouting-bottom -j quantum-l3-agent-snat 
-
-
--A quantum-l3-agent-OUTPUT -d 172.24.4.228/32 -j DNAT --to-destination 10.1.0.2 
--A quantum-l3-agent-PREROUTING -d 172.24.4.228/32 -j DNAT --to-destination 10.1.0.2 
--A quantum-l3-agent-float-snat -s 10.1.0.2/32 -j SNAT --to-source 172.24.4.228 
+In the awful case that a uuid already exists in the iptables table, how should the endpoint proceed? The
+  OVERWRITE_RULES flag states wether to overwrite the rule or raise an error.
+  - perhaps a new id should be generated? (this could happen although statiscally has a low probability)
+  - this flag in inherited from when sequential numbers were used for ids and all started at 0 at boot
 '''
-
 OVERWRITE_RULES=True
 
 _LOGGER = logging.getLogger("[IPFLOATER]")
@@ -99,14 +76,54 @@ def _ipt_chain_exists(table, chain_name):
     else:
         return False
 
-_id = -1
+def _ipt_remove_endpointchains(idendpoint):
+    '''
+    This method executes the needed funtions to remove the set of iptables rules that will make possible a redirection with the id in idendpoint.
+    '''
+    table = iptc.Table(iptc.Table.NAT)
+    table.refresh()
+    table.autocommit = False
+    _ipt_unlink_chains(table, "OUTPUT", "rule-%s-OUTPUT" % idendpoint)
+    _ipt_delete_chain(table, "rule-%s-OUTPUT" % idendpoint)
+
+    _ipt_unlink_chains(table, "POSTROUTING", "rule-%s-POSTROUTING" % idendpoint)
+    _ipt_delete_chain(table, "rule-%s-POSTROUTING" % idendpoint)
+
+    _ipt_unlink_chains(table, "PREROUTING", "rule-%s-PREROUTING" % idendpoint)
+    _ipt_delete_chain(table, "rule-%s-PREROUTING" % idendpoint)
+    table.commit()
+    table.autocommit = True
+    return True
+
+def _ipt_find_endpointchains_and_remove():
+    '''
+    This method tries to find rules that seem to have been created by the ipfloater, and deletes them. The rules seem to be created
+      by the floater if they have the form rule-XXX-OUTPUT, rule-XXX-PREROUTING and rule-XXX-POSTROUTING. The ipfloater will only
+      delete the rules if it can find the three rules that would correspond to a endpoint.
+    '''
+    table = iptc.Table(iptc.Table.NAT)
+    table.refresh()
+
+    chains = [ chain.name for chain in table.chains ]
+    chains_output = [ chainname for chainname in chains if (chainname[-7:]=="-OUTPUT") and (chainname[:5]=="rule-")]
+    
+    # Now we are going to check wether the chains refer to a rule created by us or not
+    chains_to_delete = []
+    for chainname in chains_output:
+        idendpoint = chainname[5:-7]
+        if (("rule-%s-PREROUTING" % idendpoint) in chains) and (("rule-%s-POSTROUTING" % idendpoint) in chains):
+            chains_to_delete.append(idendpoint)
+        else:
+            _LOGGER.warning("I found the chain %s that seems to be mine, but I cannot find some of the other chains that I would have created" % chainname)
+            
+    for idendpoint in chains_to_delete:
+        _ipt_remove_endpointchains(idendpoint)
+
 class Endpoint(object):
     @staticmethod
     def get_id():
-        global _id
-        _id = _id + 1
-        return _id
-    
+        return str(uuid.uuid4())[:8]
+
     def __init__(self, public_ip, public_port, private_ip, private_port):
         self.id = Endpoint.get_id()
         self.public_ip = public_ip
@@ -120,20 +137,7 @@ class Endpoint(object):
           The method relies on the name of the rules created, and uses the names with which the rules are supposed to have been created, in
           order to delete them. This method does not check any of the parameters of the rules.
         '''
-        table = iptc.Table(iptc.Table.NAT)
-        table.refresh()
-        table.autocommit = False
-        _ipt_unlink_chains(table, "OUTPUT", "rule-%d-OUTPUT" % self.id)
-        _ipt_delete_chain(table, "rule-%d-OUTPUT" % self.id)
-
-        _ipt_unlink_chains(table, "POSTROUTING", "rule-%d-POSTROUTING" % self.id)
-        _ipt_delete_chain(table, "rule-%d-POSTROUTING" % self.id)
-
-        _ipt_unlink_chains(table, "PREROUTING", "rule-%d-PREROUTING" % self.id)
-        _ipt_delete_chain(table, "rule-%d-PREROUTING" % self.id)
-        table.commit()
-        table.autocommit = True
-        return True
+        return _ipt_remove_endpointchains(self.id)
 
     def iptables_apply(self):
         '''
@@ -148,31 +152,31 @@ class Endpoint(object):
         rule_return = iptc.Rule()
         rule_return.target = iptc.Target(rule_return, "RETURN")
 
-        try:        
+        try:
             # OUTPUT Rules
-            if (_ipt_chain_exists(table, "rule-%d-OUTPUT" % self.id)):
+            if (_ipt_chain_exists(table, "rule-%s-OUTPUT" % self.id)):
                 if OVERWRITE_RULES:
-                    _ipt_unlink_chains(table, "OUTPUT", "rule-%d-OUTPUT" % self.id)
-                    _ipt_delete_chain(table, "rule-%d-OUTPUT" % self.id)
+                    _ipt_unlink_chains(table, "OUTPUT", "rule-%s-OUTPUT" % self.id)
+                    _ipt_delete_chain(table, "rule-%s-OUTPUT" % self.id)
                 else:
-                    msg = string_and_log("chain rule-%d-OUTPUT already exists" % self.id, logging.WARNING)
+                    msg = string_and_log("chain rule-%s-OUTPUT already exists" % self.id, logging.WARNING)
                     raise Exception(msg)
-            if (_ipt_chain_exists(table, "rule-%d-PREROUTING" % self.id)):
+            if (_ipt_chain_exists(table, "rule-%s-PREROUTING" % self.id)):
                 if OVERWRITE_RULES:
-                    _ipt_unlink_chains(table, "PREROUTING", "rule-%d-PREROUTING" % self.id)
-                    _ipt_delete_chain(table, "rule-%d-PREROUTING" % self.id)
+                    _ipt_unlink_chains(table, "PREROUTING", "rule-%s-PREROUTING" % self.id)
+                    _ipt_delete_chain(table, "rule-%s-PREROUTING" % self.id)
                 else:
-                    msg = string_and_log("chain rule-%d-PREROUTING already exists" % self.id, logging.WARNING)
+                    msg = string_and_log("chain rule-%s-PREROUTING already exists" % self.id, logging.WARNING)
                     raise Exception(msg)
-            if (_ipt_chain_exists(table, "rule-%d-POSTROUTING" % self.id)):
+            if (_ipt_chain_exists(table, "rule-%s-POSTROUTING" % self.id)):
                 if OVERWRITE_RULES:
-                    _ipt_unlink_chains(table, "POSTROUTING", "rule-%d-POSTROUTING" % self.id)
-                    _ipt_delete_chain(table, "rule-%d-POSTROUTING" % self.id)
+                    _ipt_unlink_chains(table, "POSTROUTING", "rule-%s-POSTROUTING" % self.id)
+                    _ipt_delete_chain(table, "rule-%s-POSTROUTING" % self.id)
                 else:
-                    msg = string_and_log("chain rule-%d-POSTROUTING already exists" % self.id, logging.WARNING)
+                    msg = string_and_log("chain rule-%s-POSTROUTING already exists" % self.id, logging.WARNING)
                     raise Exception(msg)
             
-            chain_out = table.create_chain("rule-%d-OUTPUT" % self.id)
+            chain_out = table.create_chain("rule-%s-OUTPUT" % self.id)
             rule_out = iptc.Rule()
             
             if self.private_port != 0:
@@ -190,16 +194,16 @@ class Endpoint(object):
 
             chain_out.insert_rule(rule_return)
             chain_out.insert_rule(rule_out)
-            _ipt_link_chains(table, "OUTPUT", "rule-%d-OUTPUT" % self.id)
+            _ipt_link_chains(table, "OUTPUT", "rule-%s-OUTPUT" % self.id)
 
             # PREROUTING RULES
-            chain_pre = table.create_chain("rule-%d-PREROUTING" % self.id)
+            chain_pre = table.create_chain("rule-%s-PREROUTING" % self.id)
             chain_pre.insert_rule(rule_return)
             chain_pre.insert_rule(rule_out)
-            _ipt_link_chains(table, "PREROUTING", "rule-%d-PREROUTING" % self.id)
+            _ipt_link_chains(table, "PREROUTING", "rule-%s-PREROUTING" % self.id)
 
             # POSTROUTING RULES
-            chain_post = table.create_chain("rule-%d-POSTROUTING" % self.id)
+            chain_post = table.create_chain("rule-%s-POSTROUTING" % self.id)
             rule_post = iptc.Rule()
             
             if self.public_port != 0:
@@ -217,7 +221,7 @@ class Endpoint(object):
                 rule_post.target.to_source = "%s:%d" % (self.public_ip, self.public_port)
             chain_post.insert_rule(rule_return)
             chain_post.insert_rule(rule_post)
-            _ipt_link_chains(table, "POSTROUTING", "rule-%d-POSTROUTING" % self.id)
+            _ipt_link_chains(table, "POSTROUTING", "rule-%s-POSTROUTING" % self.id)
 
             table.commit()
             table.autocommit = True
@@ -234,20 +238,20 @@ class Endpoint(object):
         '''
         
         head = "\
-iptables -t nat -N rule-%d-OUTPUT\n\
-iptables -t nat -N rule-%d-PREROUTING\n\
-iptables -t nat -N rule-%d-POSTROUTING\n\
-iptables -t nat -A OUTPUT -j rule-%d-OUTPUT\n\
-iptables -t nat -A PREROUTING -j rule-%d-PREROUTING\n\
-iptables -t nat -A POSTROUTING -j rule-%d-POSTROUTING\n\
+iptables -t nat -N rule-%s-OUTPUT\n\
+iptables -t nat -N rule-%s-PREROUTING\n\
+iptables -t nat -N rule-%s-POSTROUTING\n\
+iptables -t nat -A OUTPUT -j rule-%s-OUTPUT\n\
+iptables -t nat -A PREROUTING -j rule-%s-PREROUTING\n\
+iptables -t nat -A POSTROUTING -j rule-%s-POSTROUTING\n\
 " % (self.id, self.id, self.id, self.id, self.id, self.id)
         bottom = "\
-iptables -t nat -D OUTPUT -j rule-%d-OUTPUT\n\
-iptables -t nat -D PREROUTING -j rule-%d-PREROUTING\n\
-iptables -t nat -D POSTROUTING -j rule-%d-POSTROUTING\n\
-iptables -t nat -X rule-%d-OUTPUT\n\
-iptables -t nat -X rule-%d-PREROUTING\n\
-iptables -t nat -X rule-%d-POSTROUTING\
+iptables -t nat -D OUTPUT -j rule-%s-OUTPUT\n\
+iptables -t nat -D PREROUTING -j rule-%s-PREROUTING\n\
+iptables -t nat -D POSTROUTING -j rule-%s-POSTROUTING\n\
+iptables -t nat -X rule-%s-OUTPUT\n\
+iptables -t nat -X rule-%s-PREROUTING\n\
+iptables -t nat -X rule-%s-POSTROUTING\
 " % (self.id, self.id, self.id, self.id, self.id, self.id)
         if new:
             action = "-A"
@@ -261,26 +265,26 @@ iptables -t nat -X rule-%d-POSTROUTING\
         
         if (self.public_port == 0) and (self.private_port == 0):
             # regla desde dentro, hacia dentro (para que no salga fuera de la red)
-            rule1 = "iptables -t nat %s rule-%d-OUTPUT -d %s/32 -j DNAT --to-destination %s" % (action, self.id, self.public_ip, self.private_ip)
-            rule1b = "iptables -t nat %s rule-%d-OUTPUT -j RETURN" % (action, self.id)
+            rule1 = "iptables -t nat %s rule-%s-OUTPUT -d %s/32 -j DNAT --to-destination %s" % (action, self.id, self.public_ip, self.private_ip)
+            rule1b = "iptables -t nat %s rule-%s-OUTPUT -j RETURN" % (action, self.id)
             
             # regla de si me viene desde fuera y el destino es la ip publica y el puerto indicado, que me haga DNAT cambiando el destino a la IP privada y el puerto redirigido
-            rule2 = "iptables -t nat %s rule-%d-PREROUTING -d %s/32 -j DNAT --to-destination %s" % (action, self.id, self.public_ip, self.private_ip)
-            rule2b = "iptables -t nat %s rule-%d-PREROUTING -j RETURN" % (action, self.id)
+            rule2 = "iptables -t nat %s rule-%s-PREROUTING -d %s/32 -j DNAT --to-destination %s" % (action, self.id, self.public_ip, self.private_ip)
+            rule2b = "iptables -t nat %s rule-%s-PREROUTING -j RETURN" % (action, self.id)
             
-            rule3 = "iptables -t nat %s rule-%d-POSTROUTING -s %s/32 -j SNAT --to-source %s" % (action, self.id, self.private_ip, self.public_ip)
-            rule3b = "iptables -t nat %s rule-%d-POSTROUTING -j RETURN" % (action, self.id)
+            rule3 = "iptables -t nat %s rule-%s-POSTROUTING -s %s/32 -j SNAT --to-source %s" % (action, self.id, self.private_ip, self.public_ip)
+            rule3b = "iptables -t nat %s rule-%s-POSTROUTING -j RETURN" % (action, self.id)
         else:
             # regla desde dentro, hacia dentro (para que no salga fuera de la red)
-            rule1 = "iptables -t nat %s rule-%d-OUTPUT -d %s/32 -p tcp --dport %d -j DNAT --to-destination %s:%d" % (action, self.id, self.public_ip, self.public_port, self.private_ip, self.private_port)
-            rule1b = "iptables -t nat %s rule-%d-OUTPUT -j RETURN" % (action, self.id)
+            rule1 = "iptables -t nat %s rule-%s-OUTPUT -d %s/32 -p tcp --dport %d -j DNAT --to-destination %s:%d" % (action, self.id, self.public_ip, self.public_port, self.private_ip, self.private_port)
+            rule1b = "iptables -t nat %s rule-%s-OUTPUT -j RETURN" % (action, self.id)
             
             # regla de si me viene desde fuera y el destino es la ip publica y el puerto indicado, que me haga DNAT cambiando el destino a la IP privada y el puerto redirigido
-            rule2 = "iptables -t nat %s rule-%d-PREROUTING -d %s/32 -p tcp --dport %d -j DNAT --to-destination %s:%d" % (action, self.id, self.public_ip, self.public_port, self.private_ip, self.private_port)
-            rule2b = "iptables -t nat %s rule-%d-PREROUTING -j RETURN" % (action, self.id)
+            rule2 = "iptables -t nat %s rule-%s-PREROUTING -d %s/32 -p tcp --dport %d -j DNAT --to-destination %s:%d" % (action, self.id, self.public_ip, self.public_port, self.private_ip, self.private_port)
+            rule2b = "iptables -t nat %s rule-%s-PREROUTING -j RETURN" % (action, self.id)
             
-            rule3 = "iptables -t nat %s rule-%d-POSTROUTING -s %s/32 -p tcp --sport %d -j SNAT --to-source %s:%d" % (action, self.id, self.private_ip, self.public_port, self.public_ip, self.public_port)
-            rule3b = "iptables -t nat %s rule-%d-POSTROUTING -j RETURN" % (action, self.id)
+            rule3 = "iptables -t nat %s rule-%s-POSTROUTING -s %s/32 -p tcp --sport %d -j SNAT --to-source %s:%d" % (action, self.id, self.private_ip, self.public_port, self.public_ip, self.public_port)
+            rule3b = "iptables -t nat %s rule-%s-POSTROUTING -j RETURN" % (action, self.id)
         return "%s%s\n%s\n%s\n%s\n%s\n%s\n%s" % (head, rule1, rule1b, rule2, rule2b, rule3, rule3b, bottom)
 
     def __str__(self, ):
@@ -619,6 +623,7 @@ if __name__ == '__main__':
     eventloop.create_eventloop(True)
     
     ap = CmdLineParser("ipfloater", "This is a server that deals with iptables to enable floating IPs in private networks", [
+        Flag("--remove-endpoints", "-r", "Remove the endpoints that are in the iptables tables that seem to have been created in other session", default = False),
         Parameter("--db-file", "-d", "The path for the persistence file", 1, False, "ipfloater.db"),
         Parameter("--listen-ip", "-i", "The ip adress in which ipfloater will listen", 1, False, ["127.0.0.1"]),
         Parameter("--listen-port", "-p", "The ip port in which ipfloater will listen", 1, False, [7000]),
@@ -635,7 +640,8 @@ if __name__ == '__main__':
 
     SERVER=result.values['--listen-ip'][0]
     PORT=result.values['--listen-port'][0]
-
+    REMOVE_RULES_AT_BOOT=result.values['--remove-endpoints']
+    
     _ENDPOINT_MANAGER = EndpointManager("")
     
     # TODO: load configuration (IP Addresses, listen IP and port, Overwritting rules)
@@ -646,6 +652,9 @@ if __name__ == '__main__':
     if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [query_endpoint, unregister_endpoint, clean_private_ip, clean_public_ip, get_version, get_redirections]):
         _LOGGER.error("could not setup the service")
         raise Exception("could not setup the service")
+
+    if REMOVE_RULES_AT_BOOT:
+        _ipt_find_endpointchains_and_remove()
 
     _LOGGER.info("server running in %s:%d" % (SERVER, PORT))
 
