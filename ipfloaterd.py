@@ -1,10 +1,12 @@
 import sys
+import version
 from cpyutils.parameters import CmdLineParser, Flag, Parameter, Argument
 import cpyutils.eventloop as eventloop
 import cpyutils.db as db
 import cpyutils.xmlrpcutils as xmlrpcutils
 import logging
 import random
+import iptc
 
 
 '''
@@ -36,8 +38,66 @@ import random
 -A quantum-l3-agent-float-snat -s 10.1.0.2/32 -j SNAT --to-source 172.24.4.228 
 '''
 
+OVERWRITE_RULES=True
 
 _LOGGER = logging.getLogger("[IPFLOATER]")
+
+def string_and_log(txt, loglevel = logging.DEBUG):
+    if loglevel == logging.DEBUG:
+        _LOGGER.debug(txt)
+    elif loglevel == logging.INFO:
+        _LOGGER.info(txt)
+    elif loglevel == logging.WARNING:
+        _LOGGER.info(txt)
+    elif loglevel == logging.ERROR:
+        _LOGGER.error(txt)
+    else:
+        _LOGGER.debug(txt)
+    return txt
+
+def _ipt_delete_chain(table, chain_name):
+    '''
+    This function removes the iptables chain with name "chain_name" from the table object addressed by "table".
+    If the chain is not in the table, this function does nothing.
+    '''
+    chains = [ chain.name for chain in table.chains if chain.name == chain_name ]
+    if len(chains) > 0:
+        chain = iptc.Chain(table, chain_name)
+        for rule in chain.rules[:]:
+            chain.delete_rule(rule)
+        chain.delete()
+
+def _ipt_link_chains(table, first_chain, second_chain):
+    '''
+    This function executes an iptables rule that links the chain named "first_chain" to the chain named "second_chain"
+    in table "table". At the end, it creates a rule like: iptables -t table.name -A FIRST_CHAIN -j SECOND_CHAIN
+    '''
+    rule = iptc.Rule()
+    rule.target = rule.create_target(second_chain)
+    chain = iptc.Chain(table, first_chain)
+    chain.insert_rule(rule)
+    
+def _ipt_unlink_chains(table, first_chain, second_chain):
+    '''
+    This function executes an iptables rule that unlinks the chain named "first_chain" to the chain named "second_chain"
+    in table "table". At the end, it creates a rule like: iptables -t table.name -D FIRST_CHAIN -j SECOND_CHAIN
+    '''
+    chains = [ chain.name for chain in table.chains if chain.name == first_chain ]
+    if len(chains) > 0:
+        chain = iptc.Chain(table, first_chain)
+        rules = [ rule for rule in chain.rules if rule.target.standard_target == second_chain ]
+        for rule in rules:
+            chain.delete_rule(rule)
+
+def _ipt_chain_exists(table, chain_name):
+    '''
+    This function returns true if the iptables chain named "chain_name" is in table "table"
+    '''
+    chains = [ chain.name for chain in table.chains if chain.name == chain_name ]
+    if len(chains) > 0:
+        return True
+    else:
+        return False
 
 _id = -1
 class Endpoint(object):
@@ -54,13 +114,125 @@ class Endpoint(object):
         self.private_ip = private_ip
         self.private_port = private_port
 
-    def iptables_apply(self):
-        return False
-    
     def iptables_remove(self):
-        return False
+        '''
+        This method executes the needed funtions to remove the iptables rules that will make possible the redirection stated by the endpoint.
+          The method relies on the name of the rules created, and uses the names with which the rules are supposed to have been created, in
+          order to delete them. This method does not check any of the parameters of the rules.
+        '''
+        table = iptc.Table(iptc.Table.NAT)
+        table.refresh()
+        table.autocommit = False
+        _ipt_unlink_chains(table, "OUTPUT", "rule-%d-OUTPUT" % self.id)
+        _ipt_delete_chain(table, "rule-%d-OUTPUT" % self.id)
 
-    def ipt(self, new = False):
+        _ipt_unlink_chains(table, "POSTROUTING", "rule-%d-POSTROUTING" % self.id)
+        _ipt_delete_chain(table, "rule-%d-POSTROUTING" % self.id)
+
+        _ipt_unlink_chains(table, "PREROUTING", "rule-%d-PREROUTING" % self.id)
+        _ipt_delete_chain(table, "rule-%d-PREROUTING" % self.id)
+        table.commit()
+        table.autocommit = True
+        return True
+
+    def iptables_apply(self):
+        '''
+        This method executes the needed funtions to create the iptables rules that will make possible the redirection stated by the endpoint.
+          The method is able to detect wether the names of the rules are already occupied or not. If the names needed for the rules are occuppied,
+          depending on the configuration, the method will delete the existing rules or not.
+        '''
+        result, msg = True, ""
+        table = iptc.Table(iptc.Table.NAT)
+        table.refresh()
+        table.autocommit = False
+        rule_return = iptc.Rule()
+        rule_return.target = iptc.Target(rule_return, "RETURN")
+
+        try:        
+            # OUTPUT Rules
+            if (_ipt_chain_exists(table, "rule-%d-OUTPUT" % self.id)):
+                if OVERWRITE_RULES:
+                    _ipt_unlink_chains(table, "OUTPUT", "rule-%d-OUTPUT" % self.id)
+                    _ipt_delete_chain(table, "rule-%d-OUTPUT" % self.id)
+                else:
+                    msg = string_and_log("chain rule-%d-OUTPUT already exists" % self.id, logging.WARNING)
+                    raise Exception(msg)
+            if (_ipt_chain_exists(table, "rule-%d-PREROUTING" % self.id)):
+                if OVERWRITE_RULES:
+                    _ipt_unlink_chains(table, "PREROUTING", "rule-%d-PREROUTING" % self.id)
+                    _ipt_delete_chain(table, "rule-%d-PREROUTING" % self.id)
+                else:
+                    msg = string_and_log("chain rule-%d-PREROUTING already exists" % self.id, logging.WARNING)
+                    raise Exception(msg)
+            if (_ipt_chain_exists(table, "rule-%d-POSTROUTING" % self.id)):
+                if OVERWRITE_RULES:
+                    _ipt_unlink_chains(table, "POSTROUTING", "rule-%d-POSTROUTING" % self.id)
+                    _ipt_delete_chain(table, "rule-%d-POSTROUTING" % self.id)
+                else:
+                    msg = string_and_log("chain rule-%d-POSTROUTING already exists" % self.id, logging.WARNING)
+                    raise Exception(msg)
+            
+            chain_out = table.create_chain("rule-%d-OUTPUT" % self.id)
+            rule_out = iptc.Rule()
+            
+            if self.private_port != 0:
+                rule_out.protocol = "tcp"
+                match = iptc.Match(rule_out, "tcp")
+                match.dport = str(self.public_port)
+                rule_out.add_match(match)
+                
+            rule_out.dst = "%s/32" % self.public_ip
+            rule_out.target = rule_out.create_target("DNAT")
+            if self.public_port == 0:
+                rule_out.target.to_destination = self.private_ip
+            else:
+                rule_out.target.to_destination = "%s:%d" % (self.private_ip, self.private_port)
+
+            chain_out.insert_rule(rule_return)
+            chain_out.insert_rule(rule_out)
+            _ipt_link_chains(table, "OUTPUT", "rule-%d-OUTPUT" % self.id)
+
+            # PREROUTING RULES
+            chain_pre = table.create_chain("rule-%d-PREROUTING" % self.id)
+            chain_pre.insert_rule(rule_return)
+            chain_pre.insert_rule(rule_out)
+            _ipt_link_chains(table, "PREROUTING", "rule-%d-PREROUTING" % self.id)
+
+            # POSTROUTING RULES
+            chain_post = table.create_chain("rule-%d-POSTROUTING" % self.id)
+            rule_post = iptc.Rule()
+            
+            if self.public_port != 0:
+                rule_post.protocol = "tcp"
+                match = iptc.Match(rule_post, "tcp")
+                match.dport = str(self.private_port)
+                rule_post.add_match(match)
+                
+            rule_post.src = "%s/32" % self.private_ip
+            rule_post.target = rule_post.create_target("SNAT")
+
+            if self.public_port == 0:
+                rule_post.target.to_source = self.public_ip
+            else:
+                rule_post.target.to_source = "%s:%d" % (self.public_ip, self.public_port)
+            chain_post.insert_rule(rule_return)
+            chain_post.insert_rule(rule_post)
+            _ipt_link_chains(table, "POSTROUTING", "rule-%d-POSTROUTING" % self.id)
+
+            table.commit()
+            table.autocommit = True
+        except:
+            result = False
+
+        return result, msg
+
+    def text_rules(self, new = True):
+        '''
+        This method outputs in text mode the rules that are needed to create the redirections that implement the endpoint.
+          In case that new is False, the output will be the instructions needed to remove the endpoint. The output of the
+          method can be issued to the commandline. 
+        '''
+        
         head = "\
 iptables -t nat -N rule-%d-OUTPUT\n\
 iptables -t nat -N rule-%d-PREROUTING\n\
@@ -116,6 +288,20 @@ iptables -t nat -X rule-%d-POSTROUTING\
     
 
 class EndpointManager():
+    '''
+    This class manages the endpoints that have been created. The EndpointManager has a set of public IPs that can
+      be used to redirect their ports to some private IPs. There is an special case, when an endpoint refers to the
+      port 0. In that case, the whole traffic for the public IP will be redirected to the private IP.
+      
+    The data structure consists of two dicts of dicts. The first level is indexed by an IP address, while the second
+      level is indexed by the port. The result is and endpoint. These two data structures are redundant to each other
+      but they are created in order to ease the management and readness of the code.
+      
+    Features:
+      * A public IP MUST have an entry in the _public2private data structure. Otherwise, it will not be considered
+      * A private IP that has not any entry in the _private2public data structure is not managed by the manager and
+        that means that there is not any redirection for it.
+    '''
     def __init__(self, db_string):
         self._public2private = {}
         self._private2public = {}
@@ -128,27 +314,33 @@ class EndpointManager():
         return retval
     
     def add_public_ip(self, ip):
+        '''
+        This method adds a new public ip to the pool of public ips that are available for redirections
+        '''
         if ip in self._public2private:
             return True
 
         self._public2private[ip] = {}
         
-    def _select_public_ip(self, private_ip, private_port, public_port):
+    def _select_public_ip(self, private_ip, private_port, public_port = -1):
+        '''
+        This method is used to obtain an IP that can be used to implement the redirection. The result will be an endpoint
+          that consist of a PublicIP:public_port -> private_ip:private_port. The method will fail in case that there are
+          not any free public IPs for the endpoint.
+        '''
         if public_port < 0:
             public_port = private_port
         
         if ((public_port == 0) and (private_port != 0)) or ((private_port == 0) and (public_port != 0)):
-            _LOGGER.error("Requested one port to all endpoint. It is only possible to forward one-to-one or all-to-all")
-            return None
+            return None, string_and_log("Requested one port to all endpoint. It is only possible to forward one-to-one or all-to-all", logging.ERROR)
         
         selected_ip = None
         if private_port == 0:
             # Let's check whether the internal IP is also redirected
             if private_ip in self._private2public:
                 if 0 not in self._private2public[private_ip]:
-                    # TODO: include an option to consider ip forwarding even if there are existing rules: i.e. clean the existing rules
-                    _LOGGER.error("The IP %s has some ports redirected" % private_ip)
-                    return None
+                    # TODO: include an option to consider ip forwarding even if there are existing rules: i.e. clean the existing rules                    
+                    return None, string_and_log("The IP %s has some ports redirected" % private_ip, logging.ERROR)
                 else:
                     ep = self._private2public[private_ip][0]
                     selected_ip = ep.public_ip
@@ -157,8 +349,7 @@ class EndpointManager():
                 free_ips = [ ip for ip in self._public2private if len(self._public2private[ip]) == 0 ]
                 if len(free_ips) == 0:
                     # could not find a free IP
-                    _LOGGER.debug("could not find a free public IP")
-                    return None
+                    return None, string_and_log("could not find a free public IP")
                 else:
                     # TODO: implement different policies: random, prioritized, round robbin, etc.
                     selected_ip = free_ips[random.randint(0, len(free_ips) - 1)]
@@ -167,8 +358,7 @@ class EndpointManager():
             if private_ip in self._private2public:
                 if 0 in self._private2public[private_ip]:
                     ep = (self._private2public[private_ip])[0]
-                    _LOGGER.warning("requested a public ip for %s:%d while the whole ip is redirected from %s" % (private_ip, private_port, ep.public_ip))
-                    return None
+                    return None, string_and_log("requested a public ip for %s:%d while the whole ip is redirected from %s" % (private_ip, private_port, ep.public_ip), logging.WARNING)
 
                 for port, ep in self._private2public[private_ip].items():
                     if ep.public_ip not in public_ips:
@@ -187,21 +377,23 @@ class EndpointManager():
                             ip_list.append((ip, -len(self._public2private[ip])))
     
             if len(ip_list) == 0:
-                _LOGGER.warning("requested a redirection for %s:%d but we have not free public ips" % (private_ip, private_port))
-                return None
+                return None, string_and_log("requested a redirection for %s:%d but we have not free public ips" % (private_ip, private_port), logging.WARNING)
             
             ip_sorted = sorted(ip_list, key = lambda ip : ip[1])
             (selected_ip, _) = ip_sorted[0]
         
-        return Endpoint(selected_ip, public_port, private_ip, private_port)
+        return Endpoint(selected_ip, public_port, private_ip, private_port), ""
     
     def _add_ep(self, endpoint):
+        '''
+        This method stores an endpoint in the manager. WARNING: this method overwrites the existing peers (i.e. does
+        not check whether they are occupied or not).
+        '''
         if endpoint is None:
             return False
         
         if endpoint.public_ip not in self._public2private:
-            _LOGGER.error("tried to redirect a public ip that it is not managed by us")
-            return False
+            return False, string_and_log("tried to redirect a public ip that it is not managed by us", logging.ERROR)
         
         if endpoint.private_ip not in self._private2public:
             self._private2public[endpoint.private_ip] = {}
@@ -212,6 +404,9 @@ class EndpointManager():
         return True
     
     def _remove_ep(self, endpoint):
+        '''
+        This method removes an endpoint from the manager, if it exists.
+        '''
         if endpoint is None:
             return False
         
@@ -228,6 +423,9 @@ class EndpointManager():
         return True
 
     def _get_ep_from_private(self, private_ip, private_port):
+        '''
+        This method check whether there is a redirection to private_ip:private_port and returns it
+        '''
         if private_ip not in self._private2public:
             return None
         
@@ -237,6 +435,9 @@ class EndpointManager():
         return (self._private2public[private_ip])[private_port]
 
     def _get_ep_from_public(self, public_ip, public_port):
+        '''
+        This method check whether there is a redirection from public_ip:public_port and returns it
+        '''
         if public_ip not in self._public2private:
             return None
         
@@ -246,6 +447,13 @@ class EndpointManager():
         return (self._public2private[public_ip])[public_port]
     
     def _check_availability(self, ep_list, ip, port, consider_available_if_ip_not_exists = True):
+        '''
+        This method checks whether an ip and a port are available for redirection (i.e. are not in the data
+          structure). This is an internal method used to manage the data structures in a generic manner, so
+          it is needed the latter parameter to differentiate between the public and the private data structures:
+          in the case of the public IPs, if it does not exist an entry in the data structure, it means that
+          it is not available (in the case of private IPs, the non existence means that it is fully available).
+        '''
         if ip in ep_list:
             if 0 in ep_list[ip]: return False
             if port in ep_list[ip]: return False
@@ -257,12 +465,24 @@ class EndpointManager():
         return True
     
     def _public_available(self, public_ip, public_port):
+        '''
+        This method return True in case that the public_ip and public_port are available for redirection
+          (i.e. the pair public_ip:public_port is not occupied, nor the ip is fully redirected (port 0))
+        '''
         return self._check_availability(self._public2private, public_ip, public_port, False)
 
     def _private_available(self, private_ip, private_port):
+        '''
+        This method return True in case that the private_ip and private_port are available for redirection
+          (i.e. the pair private_ip:private_port is not occupied, nor the ip is fully redirected (port 0))
+        '''
         return self._check_availability(self._private2public, private_ip, private_port, True)
 
     def _remove_eps_from_list(self, ep_list):
+        '''
+        This method removes a set of endpoints from the manager. The list is in fact a dictionary of eps,
+          indexed by the port number.
+        '''
         ep_list = [ ep for _,ep in ep_list.items() ]
         error = False
         for ep in ep_list:
@@ -272,34 +492,44 @@ class EndpointManager():
         return (not error)
     
     def _get_ep(self, ep):
-        return self._get_ep_from_private(ep.private_ip, ep.private_port)    
+        '''
+        This method returns the ep, in case that it exists. 
+        '''
+        ex_ep = self._get_ep_from_private(ep.private_ip, ep.private_port)
+        if (ex_ep.public_ip != ep.public_ip) or (ex_ep.public_port != ep.public_port):
+            return None
+        return ex_ep
     
     def apply_endpoint(self, ep):
         '''
-        This function applies an endpoint (if it is possible)
-        '''
-        
-        if not self._private_available(ep.private_ip, ep.private_port):
-            _LOGGER.warning("tried to apply a redirection to %s:%d but it is already occupied" % (ep.private_ip, ep.private_port))
-            return False            
+        This function applies an endpoint (if it is possible), and stores it in the data structures.
+        '''        
+        if not self._private_available(ep.private_ip, ep.private_port):            
+            return False, string_and_log("tried to apply a redirection to %s:%d but it is already occupied" % (ep.private_ip, ep.private_port), logging.WARNING)
 
         if not self._public_available(ep.public_ip, ep.public_port):
-            _LOGGER.warning("tried to apply a redirection from %s:%d but it is either occupied or the ip is not managed by ipfloater" % (ep.public_ip, ep.public_port))
-            return False
+            return False, string_and_log("tried to apply a redirection from %s:%d but it is either occupied or the ip is not managed by ipfloater" % (ep.public_ip, ep.public_port), logging.WARNING)
         
-        # TODO: apply on iptables
-        self._add_ep(ep)
-        return True        
+        result, msg = ep.iptables_apply()
+        if result:
+            self._add_ep(ep)
+            return True, ""
+        else:
+            return False, msg
     
     def request_endpoint(self, private_ip, private_port, public_port = -1):
+        '''
+        This function requests an IP for a pair private_ip:private_port, and returns the corresponding endpoint.
+        '''        
         if not self._private_available(private_ip, private_port):
-            _LOGGER.warning("requesting a redirection to %s:%d, but it is already occupied" % (private_ip, private_port))
-            return None
+            return None, string_and_log("requesting a redirection to %s:%d, but it is already occupied" % (private_ip, private_port), logging.WARNING)
         
-        ep = self._select_public_ip(private_ip, private_port, public_port)
-        return ep
+        return self._select_public_ip(private_ip, private_port, public_port)
         
     def terminate_redirection(self, private_ip, private_port):
+        '''
+        This function deletes the redirection to the private_ip:private_port, if it exists.
+        '''
         ep = self._get_ep_from_private(private_ip, private_port)
         if ep is None:
             return False
@@ -307,21 +537,29 @@ class EndpointManager():
         return self._remove_ep(ep)
 
     def free_endpoint(self, ep):
+        '''
+        This function deletes the redirection stated by an endpoint, in case that it exists
+        '''
         if self._get_ep(ep) is None:
-            _LOGGER.warning("tried to remove and endpoint that does not exist %s" % ep)
-            return False
-        _LOGGER.debug("endpoint %s successfully removed" % ep)
-        return True
+            return False, string_and_log("tried to remove and endpoint that does not exist %s" % ep, logging.WARNING)
+        
+        return True, string_and_log("endpoint %s successfully removed" % ep)
     
     def clean_private_ip(self, private_ip):
+        '''
+        This function deletes all the redirections that point to any port of a specific private ip
+        '''
         if private_ip not in self._private2public:
-            return True
-        return self._remove_eps_from_list(self._private2public[private_ip])
+            return True, string_and_log("ip %s was not managed by me, so I should consider that it is clean" % private_ip)
+        return self._remove_eps_from_list(self._private2public[private_ip]), string_and_log("endpoints successfully removed")
     
     def clean_public_ip(self, public_ip):
+        '''
+        This function deletes all the redirections that part from any port of a specific public ip
+        '''
         if public_ip not in self._public2private:
-            return False
-        return self._remove_eps_from_list(self._public2private[public_ip])
+            return False, string_and_log("tried to remove redirections from ip %s but it is not managed by me" % public_ip)
+        return self._remove_eps_from_list(self._public2private[public_ip]), string_and_log("endpoints successfully removed")
     
 _ENDPOINT_MANAGER = None
 
@@ -331,13 +569,14 @@ def query_endpoint(dst_ip, dst_port, register = True):
     if _ENDPOINT_MANAGER is None:
         return False, "Endpoint Manager not found"
     
-    ep = _ENDPOINT_MANAGER.request_endpoint(dst_ip, dst_port)
+    ep, info = _ENDPOINT_MANAGER.request_endpoint(dst_ip, dst_port)
     if ep is None:
-        return False, "Could not obtain a redirection for %s:%d" % (dst_ip, dst_port)
+        return False, "Could not obtain a redirection for %s:%d (%s)" % (dst_ip, dst_port, info)
     
     if register:
-        if not _ENDPOINT_MANAGER.apply_endpoint(ep):
-            return False, "Could not apply the redirection %s" % ep
+        result, msg = _ENDPOINT_MANAGER.apply_endpoint(ep)
+        if not result:
+            return False, "Could not apply the redirection %s (%s)" % (ep, msg)
 
     return True, ep
 
@@ -369,44 +608,13 @@ def clean_public_ip(public_ip):
     
     return True, "Redirections from %s unregistered" % public_ip
 
+def get_version():
+    return version.get()
+
+def get_redirections():
+    return str(_ENDPOINT_MANAGER)
+
 if __name__ == '__main__':
-    #logging.basicConfig(filename=None,level=logging.DEBUG)
-    #epm = EndpointManager("")
-    #epm.add_public_ip("10.0.0.72")
-    #epm.add_public_ip("10.0.0.69")
-    #
-    #ep = epm.request_endpoint("10.3.0.5", 0)
-    #print ep.ipt()
-    #epm.apply_endpoint(ep)
-    #print epm
-    #
-    #ep = epm.request_endpoint("10.3.0.7", 0)
-    #print ep.ipt()
-    #epm.apply_endpoint(ep)
-    #print epm
-    #
-    #ep = epm.request_endpoint("10.3.0.8", 22)
-    #print ep.ipt()
-    #epm.apply_endpoint(ep)
-    #print epm
-    #
-    #
-    #epm.clean_private_ip("10.3.0.7")
-    #print epm
-    #
-    ##print (epm.query_endpoint("192.168.1.1", 0)).ipt()
-    ##print (epm.query_endpoint("192.168.1.2", 1)).ipt()
-    ##print epm.query_endpoint("192.168.1.3", 1)
-    ##print epm.query_endpoint("192.168.1.2", 3)
-    ##print epm.query_endpoint("192.168.1.2", 4)
-    ##print epm.query_endpoint("192.168.1.2", 5)
-    ##print epm.query_endpoint("192.168.1.2", 6)
-    ### print epm.query_endpoint("192.168.1.1", 3)
-    ##print epm.query_endpoint("192.168.1.3", 3)
-    #sys.exit(0)
-
-
-# if __name__ == '__main__':
     logging.basicConfig(filename=None,level=logging.DEBUG)
     eventloop.create_eventloop(True)
     
@@ -417,7 +625,6 @@ if __name__ == '__main__':
     ])
 
     parsed, result, info = ap.parse(sys.argv[1:])
-    # print result.values
     if not parsed:
         if (result is None):
             print "Error:", info
@@ -430,7 +637,13 @@ if __name__ == '__main__':
     PORT=result.values['--listen-port'][0]
 
     _ENDPOINT_MANAGER = EndpointManager("")
-    if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [query_endpoint, unregister_endpoint, clean_private_ip, clean_public_ip]):
+    
+    # TODO: load configuration (IP Addresses, listen IP and port, Overwritting rules)
+    # TODO: persist in database
+    _ENDPOINT_MANAGER.add_public_ip("150.0.0.1")
+    _ENDPOINT_MANAGER.add_public_ip("150.0.0.2")
+    
+    if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [query_endpoint, unregister_endpoint, clean_private_ip, clean_public_ip, get_version, get_redirections]):
         _LOGGER.error("could not setup the service")
         raise Exception("could not setup the service")
 
