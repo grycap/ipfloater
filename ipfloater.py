@@ -1,12 +1,34 @@
+#! /usr/bin/env python
+# coding: utf-8
+#
+# Floating IP Addresses manager (IPFloater)
+# Copyright (C) 2015 - GRyCAP - Universitat Politecnica de Valencia
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# 
 import sys
 from cpyutils.parameters import CmdLineParser, Flag, Parameter, Argument, Operation
 import cpyutils.eventloop as eventloop
 import cpyutils.db as db
+import cpyutils.log
 import cpyutils.xmlrpcutils as xmlrpcutils
 import logging
 import version
 
-if __name__ == '__main__':
+_LOGGER = cpyutils.log.Log("IPFLOATER")
+
+def main_function():
     logging.basicConfig(filename=None,level=logging.DEBUG)
     eventloop.create_eventloop(True)
 
@@ -15,6 +37,13 @@ if __name__ == '__main__':
             SERVER=result.values['--server-ip'][0]
             PORT=result.values['--server-port'][0]
             self._XMLRPC_SERVER = xmlrpcutils.ServerProxy("http://%s:%d" % (SERVER, PORT))
+
+        def ippool(self, parse_result, error):
+            try:
+                _, ips = self._XMLRPC_SERVER.get_public_ips()
+                return True, "IP Pool:\n%s\n%s" % ("-"*40, ", ".join(ips))
+            except:
+                return False, "Could not contact the server"
 
         def getip(self, parse_result, error):
             result, ep = self._XMLRPC_SERVER.query_endpoint(parse_result.values['ip'][0], 0)
@@ -55,6 +84,10 @@ if __name__ == '__main__':
             ]),
             Operation("status", desc = "Gets the status of the redirections"),
             Operation("version", desc = "Gets the version of the client and the server"),
+            Operation("ippool", desc = "Gets the public ip addresses in the pool"),
     ])
 
     ap.self_service(True)
+    
+if __name__ == '__main__':
+    main_function()
