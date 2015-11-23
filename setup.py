@@ -20,6 +20,12 @@
 from distutils.core import setup
 from version import VERSION
 
+# How to install:
+# $ apt-get install python python-pip iptables
+# $ pip install --upgrade python-iptables cpyutils
+# $ python setup.py install --record installed-files.txt
+
+
 setup(name='ipfloater',
       version=VERSION,
       description='IPFloater - Floating IP Addresses manager',
@@ -27,7 +33,7 @@ setup(name='ipfloater',
       author_email='caralla@upv.es',
       url='http://github.com/dealfonso/ipfloater',
       scripts = [ 'ipfloaterd', 'ipfloater', 'ipfloaterdaemon' ],
-      data_files = [ ('/etc/', ['etc/ipfloater.conf'] ) ],
+      data_files = [ ('/etc/', ['etc/ipfloaterd.conf'] ) ],
       packages = [ 'ipfloater' ],
       package_dir = { 'ipfloater' : '.'},
       download_url = 'https://github.com/dealfonso/ipfloater',

@@ -98,6 +98,7 @@ def get_redirections():
     return str(_ENDPOINT_MANAGER)
 
 def main_loop():
+    global _ENDPOINT_MANAGER
     eventloop.create_eventloop(True)
     
     ap = CmdLineParser("ipfloater", "This is a server that deals with iptables to enable floating IPs in private networks", [
