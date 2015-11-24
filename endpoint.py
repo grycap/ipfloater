@@ -408,7 +408,7 @@ class EndpointManager():
         if len(self._private2public[endpoint.private_ip]) == 0:
             del self._private2public[endpoint.private_ip]
             
-        self._unsave_endpoint(endpoint)
+        # self._unsave_endpoint(endpoint)
             
         return True
 
@@ -476,7 +476,8 @@ class EndpointManager():
         ep_list = [ ep for _,ep in ep_list.items() ]
         error = False
         for ep in ep_list:
-            if not self._remove_ep(ep):
+	    result, _ = self.terminate_endpoint(ep)
+	    if not result:
                 error = True
                 _LOGGER.error("failed to remove endpoint: %s" % ep)
         return (not error)
@@ -529,14 +530,20 @@ class EndpointManager():
         
         return self._remove_ep(ep)
 
-    def free_endpoint(self, ep):
+    def terminate_endpoint(self, ep):
         '''
         This function deletes the redirection stated by an endpoint, in case that it exists
         '''
         if self._get_ep(ep) is None:
             return False, _LOGGER.log("tried to remove and endpoint that does not exist %s" % ep, logging.WARNING)
-        
-        return True, _LOGGER.log("endpoint %s successfully removed" % ep)
+	
+	result = ep.iptables_remove()
+	if result:
+	    self._remove_ep(ep)
+	    self._unsave_endpoint(ep)
+            return True, _LOGGER.log("endpoint %s successfully removed" % ep)
+	else:
+            return False, _LOGGER.log("failed to remove the iptables rules corresponding to %s" % ep)
     
     def clean_private_ip(self, private_ip):
         '''
