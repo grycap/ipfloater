@@ -48,13 +48,13 @@ def main_function():
         def getip(self, parse_result, error):
             result, ep = self._XMLRPC_SERVER.query_endpoint(parse_result.values['ip'][0], 0)
             if result:
-                return True, "Redirection obtained: %s" % ep
+                return True, "Public IP obtained: %s" % ep['public_ip']
             else:
                 return False, "Could not obtain a redirection (server responded: %s)" % ep
         
         def releaseip(self, parse_result, error):
             ip = parse_result.values['ip'][0]
-            result, ep = self._XMLRPC_SERVER.clean_private_ip(ip)
+            result, ep = self._XMLRPC_SERVER.clean_public_ip(ip)
             if result:
                 return True, "Released the redirection to IP %s" % (ip)
             else:

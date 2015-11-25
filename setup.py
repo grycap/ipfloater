@@ -21,8 +21,10 @@ from distutils.core import setup
 from version import VERSION
 
 # How to install:
-# $ apt-get install python python-pip iptables
+# $ apt-get update
+# $ apt-get install python python-pip iptables git
 # $ pip install --upgrade python-iptables cpyutils
+# $ git clone https://github.com/dealfonso/ipfloater
 # $ python setup.py install --record installed-files.txt
 
 
@@ -32,10 +34,12 @@ setup(name='ipfloater',
       author='Carlos de Alfonso',
       author_email='caralla@upv.es',
       url='http://github.com/dealfonso/ipfloater',
-      scripts = [ 'ipfloaterd', 'ipfloater', 'ipfloaterdaemon' ],
-      data_files = [ ('/etc/', ['etc/ipfloaterd.conf'] ) ],
+      scripts = [ 'ipfloater', 'ipfloaterdaemon' ],
+      data_files = [ ('/etc/default/', ['etc/ipfloaterd.conf'] ),
+        ('/etc/init.d/', ['ipfloaterd'])
+        ],
       packages = [ 'ipfloater' ],
       package_dir = { 'ipfloater' : '.'},
       download_url = 'https://github.com/dealfonso/ipfloater',
-      install_requires = [ 'cpyutils >= 0.09' ]
+      install_requires = [ 'cpyutils >= 0.10' ]
 )

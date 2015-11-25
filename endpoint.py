@@ -536,13 +536,13 @@ class EndpointManager():
         '''
         if self._get_ep(ep) is None:
             return False, _LOGGER.log("tried to remove and endpoint that does not exist %s" % ep, logging.WARNING)
-	
-	result = ep.iptables_remove()
-	if result:
-	    self._remove_ep(ep)
-	    self._unsave_endpoint(ep)
+        
+        result = ep.iptables_remove()
+        if result:
+            self._remove_ep(ep)
+            self._unsave_endpoint(ep)
             return True, _LOGGER.log("endpoint %s successfully removed" % ep)
-	else:
+        else:
             return False, _LOGGER.log("failed to remove the iptables rules corresponding to %s" % ep)
     
     def clean_private_ip(self, private_ip):
@@ -550,7 +550,7 @@ class EndpointManager():
         This function deletes all the redirections that point to any port of a specific private ip
         '''
         if private_ip not in self._private2public:
-            return True, _LOGGER.log("ip %s was not managed by me, so I should consider that it is clean" % private_ip)
+            return False, _LOGGER.log("ip %s was not managed by me, so I do not know how to clean it" % private_ip)
         return self._remove_eps_from_list(self._private2public[private_ip]), _LOGGER.log("endpoints successfully removed")
     
     def clean_public_ip(self, public_ip):

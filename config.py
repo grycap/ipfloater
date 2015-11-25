@@ -18,7 +18,7 @@
 # 
 import cpyutils.config
 
-cpyutils.config.set_paths([ './etc/', '/etc/ipfloater/', '/etc/' ])
+cpyutils.config.set_paths([ './etc/', '/etc/default/', '/etc/ipfloater/', '/etc/' ])
 cpyutils.config.set_main_config_file("ipfloaterd.conf")
 
 class IPFloaterConfig(cpyutils.config.Configuration):
