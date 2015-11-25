@@ -8,7 +8,7 @@ IP Floater consists of a server that enables associating a public accessible IP 
 
 ## Use case
 The use case is shown in the figure
-![IMAGE](https://github.com/dealfonso/ipfloater/blob/devel/img/ipfloater.jpg?raw=true =200x)
+![IMAGE](https://github.com/grycap/ipfloater/blob/master/img/ipfloater.jpg?raw=true =200x)
 
 In that use case, we have multiple Virtual Machines, but in particular we have a web server (with private IP 192.168.1.40) and the front-end of a virtual cluster that is connected to its working nodes (with private IP 192.168.1.32). We need to access the web server and the front-end from the internet, but we do not need to access to the working nodes. The most common way is to access to the working nodes from the front-end.
 
