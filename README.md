@@ -28,6 +28,21 @@ IPFloater has to be installed in a server that is connected to the internet and 
 
 We'll assume eth0 for the interface that has access to the public network and eth1 for the interface that has access to the private network.
 
+## Setup
+
+You have to assign the floating IP addresses to the public interface **eth0**. The most easy way of assigning them is by using the ```ip``` command:
+
+```bash
+$ ip addr add 216.58.211.227/32 dev eth0
+$ ip addr add 216.58.211.228/32 dev eth0
+```
+
+Then, it is advisable to include a rule to drop any packet that is directed to these IP addresses in the INPUT chain.
+
+```
+$ iptables -I INPUT -d 216.58.211.227/32 -j DROP
+```
+
 ### Installing
 
 ```bash
@@ -50,6 +65,7 @@ Finally you can start the daemon:
 ```bash
 $ ipfloaterd start
 ```
+
 # Using IPFloater
 
 IPFloater has a command line application whose help is self-contained
