@@ -97,6 +97,103 @@ def get_version():
 def get_redirections():
     return str(_ENDPOINT_MANAGER)
 
+import cpyutils.restutils
+app = cpyutils.restutils.get_app()
+
+@app.route('/redirections/')
+def get_endpoints():
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    return cpyutils.restutils.response_json(_ENDPOINT_MANAGER.get_endpoints())
+
+@app.route('/public/')
+def get_public_redirections():
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    return cpyutils.restutils.response_json(_ENDPOINT_MANAGER.get_endpoints_from_public())
+
+@app.route('/public/:ip')
+def get_public_redirections(ip):
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    eps = _ENDPOINT_MANAGER.get_endpoints_from_public()
+    if ip in eps:
+        return cpyutils.restutils.response_json(eps[ip])
+    else:
+        return cpyutils.restutils.error(404, "IP %s not found" % ip)
+
+def create_public_redirection(ip_pub, port_pub, ip_priv, port_priv):
+    '''
+    This method requests a whole specific public IP to be redirected to a private IP
+    '''
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    return cpyutils.restutils.error(404, "Not implemented")
+
+@app.route('/public/:ip_pub/:port_pub/redirect/:ip_priv/:port_priv', method = 'PUT')
+def create_public_redirection(ip_pub, port_pub, ip_priv, port_priv):
+    ''' PUT {ip, port} (crea una redireccion a "ip:port") '''
+    return create_public_redirection(ip_pub, port_pub, ip_priv, port_priv)
+@app.route('/public/any/:port_pub/redirect/:ip_priv/:port_priv', method = 'PUT')
+def create_public_redirection(port_pub, ip_priv, port_priv):
+    ''' PUT {ip, port} (crea una redireccion a "ip:port", y le da igual la ip que le den) '''
+    return create_public_redirection(None, port_pub, ip_priv, port_priv)
+@app.route('/public/:ip_pub/redirect/:ip_priv/:port_priv', method = 'PUT')
+def create_public_redirection(ip_pub, ip_priv, port_priv):
+    ''' PUT {ip, port} (crea una redireccion a "ip:port", y le da igual el puerto que le den) '''
+    return create_public_redirection(ip_pub, None, ip_priv, port_priv)
+@app.route('/public/redirect/:ip_priv/:port_priv', method = 'PUT')
+def create_public_redirection(ip_priv, port_priv):
+    ''' PUT {ip, port} (crea una redireccion a "ip:port", y le da igual la ip y el puerto que le den) '''
+    return create_public_redirection(None, None, ip_priv, port_priv)
+
+@app.route('/public/:ip/:port')
+def get_public_redirections(ip, port):
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    try:
+        port = int(port.strip("/"))
+    except:
+        return cpyutils.restutils.error(400, "Malformed request: port is an integer")
+    
+    eps = _ENDPOINT_MANAGER.get_endpoints_from_public()
+    if (ip in eps) and (port in (eps[ip])):
+        return cpyutils.restutils.response_json((eps[ip])[port])
+    else:
+        return cpyutils.restutils.error(404, "redirection not found")
+
+@app.route('/private/')
+def get_private_redirections():
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    return cpyutils.restutils.response_json(_ENDPOINT_MANAGER.get_endpoints_from_private())
+
+@app.route('/private/:ip')
+def get_private_redirections(ip):
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    eps = _ENDPOINT_MANAGER.get_endpoints_from_private()
+    if ip in eps:
+        return cpyutils.restutils.response_json(eps[ip])
+    else:
+        return cpyutils.restutils.error(404, "IP %s not found" % ip)
+
+@app.route('/private/:ip/:port')
+def get_public_redirections(ip, port):
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    
+    try:
+        port = int(port.strip("/"))
+    except:
+        return cpyutils.restutils.error(400, "Malformed request: port is an integer")
+    
+    eps = _ENDPOINT_MANAGER.get_endpoints_from_private()
+    if (ip in eps) and (port in (eps[ip])):
+        return cpyutils.restutils.response_json((eps[ip])[port])
+    else:
+        return cpyutils.restutils.error(404, "redirection not found")
+
 def main_loop():
     global _ENDPOINT_MANAGER
     eventloop.create_eventloop(True)
@@ -136,6 +233,8 @@ def main_loop():
         
     _ENDPOINT_MANAGER.get_data_from_db()
     _LOGGER.info("server running in %s:%d" % (SERVER, PORT))
+
+    cpyutils.restutils.run_in_thread("0.0.0.0", 7001)
 
     eventloop.get_eventloop().loop()
 

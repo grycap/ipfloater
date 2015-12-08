@@ -32,6 +32,14 @@ class Endpoint(object):
     def get_id():
         return str(uuid.uuid4())[:8]
 
+    def to_json(self):
+        return {'id': self.id,
+                'public_ip': self.public_ip,
+                'public_port': self.public_port,
+                'private_ip': self.private_ip,
+                'private_port': self.private_port,
+                'timestamp': self.timestamp}
+
     def __init__(self, public_ip, public_port, private_ip, private_port):
         self.id = Endpoint.get_id()
         self.public_ip = public_ip
@@ -560,3 +568,32 @@ class EndpointManager():
         if public_ip not in self._public2private:
             return False, _LOGGER.log("tried to remove redirections from ip %s but it is not managed by me" % public_ip)
         return self._remove_eps_from_list(self._public2private[public_ip]), _LOGGER.log("endpoints successfully removed")
+
+    def get_endpoints(self):
+        eps = {}
+        for ip, endpoints in self._private2public.items():
+            for _, ep in endpoints.items():
+                eps[ep.id] = ep.to_json()
+            
+        return eps
+    
+    def get_endpoints_from_public(self):
+        eps = {}
+        for ip, endpoints in self._public2private.items():
+            redirs = {}
+            for _, ep in endpoints.items():
+                redirs[ep.public_port] = ep.to_json()
+
+            eps[ip] = redirs
+            
+        return eps
+    
+    def get_endpoints_from_private(self):
+        eps = {}
+        for ip, endpoints in self._private2public.items():
+            redirs = {}
+            for _, ep in endpoints.items():
+                redirs[ep.private_port] = ep.to_json()
+            eps[ip] = redirs
+            
+        return eps
