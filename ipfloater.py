@@ -48,7 +48,7 @@ def main_function():
         def getip(self, parse_result, error):
             result, ep = self._XMLRPC_SERVER.query_endpoint(parse_result.values['ip'][0], 0)
             if result:
-                return True, "Public IP obtained: %s" % ep['public_ip']
+                return True, "Public IP obtained: %s" % str(ep)
             else:
                 return False, "Could not obtain a redirection (server responded: %s)" % ep
         
@@ -56,9 +56,9 @@ def main_function():
             ip = parse_result.values['ip'][0]
             result, ep = self._XMLRPC_SERVER.clean_public_ip(ip)
             if result:
-                return True, "Released the redirection to IP %s" % (ip)
+                return True, "Released the redirection from IP %s" % (ip)
             else:
-                return False, "Could not release the redirectino to IP %s (server responded: %s)" % (ip, ep)
+                return False, "Could not release the redirection from IP %s (server responded: %s)" % (ip, ep)
         
         def status(self, result, error):
             try:
@@ -79,8 +79,8 @@ def main_function():
             Operation("getip", desc = "Requests a floating IP for a private IP", arguments = [
                 Argument("ip", "private ip address to which is requested the floating ip", mandatory = True, count = 1),
             ]),
-            Operation("releaseip", desc = "Releases the floating IP to a private IP", arguments = [
-                Argument("ip", "private ip address to which is granted the floating ip", mandatory = True, count = 1),
+            Operation("releaseip", desc = "Releases a floating IP", arguments = [
+                Argument("ip", "public ip address (the floating ip)", mandatory = True, count = 1),
             ]),
             Operation("status", desc = "Gets the status of the redirections"),
             Operation("version", desc = "Gets the version of the client and the server"),

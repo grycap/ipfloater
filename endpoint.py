@@ -27,6 +27,44 @@ import time
 
 _LOGGER = cpyutils.log.Log("ep")
 
+def _ip2hex(ip):
+    parts = ip.split(".")
+    if len(parts) != 4: return None
+    ipv = 0
+    for part in parts:
+        try:
+            p = int(part)
+            ipv = (ipv << 8) + p
+        except:
+            return None
+    return ipv
+
+def str_to_ipmask(ipmask):
+    v = ipmask.split("/")
+    if len(v) > 2: raise Exception("bad mask format")
+    mask_ip = _ip2hex(v[0])
+    if mask_ip is None: raise Exception("bad mask format")
+    mask = v[1] if len(v) == 2 else 32
+    try:
+        mask = (0xffffffff00000000 >> int(mask)) & 0xffffffff
+    except:
+        mask = _ip2hex(v[1])
+    
+    if mask is None: raise Exception("bad mask format")
+    return mask_ip, mask
+
+
+def ip_in_ip_mask(ip, mask_ip, mask):
+    ip = _ip2hex(ip)
+    if ip is None: raise Exception("bad ip format")
+    if (mask_ip & mask) == (ip & mask):
+        return True
+    return False
+
+def ip_in_ipmask(ip, ipmask):
+    mask_ip, mask = str_to_ipmask(ipmask)
+    return ip_in_ip_maks(ip, mask_ip, mask)
+
 class Endpoint(object):
     @staticmethod
     def get_id():
@@ -43,9 +81,9 @@ class Endpoint(object):
     def __init__(self, public_ip, public_port, private_ip, private_port):
         self.id = Endpoint.get_id()
         self.public_ip = public_ip
-        self.public_port = public_port
+        self.public_port = int(public_port)
         self.private_ip = private_ip
-        self.private_port = private_port
+        self.private_port = int(private_port)
         self.timestamp = time.time()
 
     def iptables_remove(self):
@@ -227,7 +265,15 @@ class EndpointManager():
         self._public2private = {}
         self._private2public = {}
         self._dbstring = db_string
+        self._private_ip_ranges = []
         result, _ = self._initialize_db()
+    
+    def _ip_in_ranges(self, ip):
+        # We'll check if the ip is in any of the ranges controlled by the manager
+        for (mask_ip, mask) in self._private_ip_ranges:
+            if ip_in_ip_mask(ip, mask_ip, mask):
+                return True
+        return False
     
     def __str__(self):
         retval = ""
@@ -251,6 +297,14 @@ class EndpointManager():
 
             return False, _LOGGER.warning("could not create a connection to the databse")
     
+    def add_private_range(self, ipmask):
+        try:
+            mask_ip, mask = str_to_ipmask(ipmask)
+        except:
+            return False
+        _LOGGER.log("range %s successfully added" % ipmask)
+        self._private_ip_ranges.append((mask_ip, mask))
+    
     def get_data_from_db(self):
         if self._dbstring is None:
             return False, ""
@@ -259,13 +313,21 @@ class EndpointManager():
         if db is not None:
             success, rowcount, rows = db.sql_query("select * from endpoint", True)
             if success:
+                bad_eps = []
                 for row in rows:
                     _id, public_ip, public_port, private_ip, private_port, timestamp = row
                     ep = Endpoint(public_ip, public_port, private_ip, private_port)
                     ep.id = _id
                     ep.timestamp = timestamp
-                    self.apply_endpoint(ep, False)
                     _LOGGER.debug("reading endpoint %s from the database" % ep)
+                    result, msg = self.apply_endpoint(ep, False)
+                    if not result:
+                        _LOGGER.warning("ignoring (%s)" % msg)
+                        bad_eps.append(ep)
+                        
+                # Cleaning bad endpoints
+                for ep in bad_eps:
+                    self._unsave_endpoint(ep)
                 
                 return True, "Reading %d endpoints" % rowcount
             else:
@@ -317,69 +379,7 @@ class EndpointManager():
         
     def get_public_ips(self):
         return self._public2private.keys()
-        
-    def _select_public_ip(self, private_ip, private_port, public_port = -1):
-        '''
-        This method is used to obtain an IP that can be used to implement the redirection. The result will be an endpoint
-          that consist of a PublicIP:public_port -> private_ip:private_port. The method will fail in case that there are
-          not any free public IPs for the endpoint.
-        '''
-        if public_port < 0:
-            public_port = private_port
-        
-        if ((public_port == 0) and (private_port != 0)) or ((private_port == 0) and (public_port != 0)):
-            return None, _LOGGER.log("Requested one port to all endpoint. It is only possible to forward one-to-one or all-to-all", logging.ERROR)
-        
-        selected_ip = None
-        if private_port == 0:
-            # Let's check whether the internal IP is also redirected
-            if private_ip in self._private2public:
-                if 0 not in self._private2public[private_ip]:
-                    # TODO: include an option to consider ip forwarding even if there are existing rules: i.e. clean the existing rules                    
-                    return None, _LOGGER.log("The IP %s has some ports redirected" % private_ip, logging.ERROR)
-                else:
-                    ep = self._private2public[private_ip][0]
-                    selected_ip = ep.public_ip
-            else:
-                # let's look for a free IP
-                free_ips = [ ip for ip in self._public2private if len(self._public2private[ip]) == 0 ]
-                if len(free_ips) == 0:
-                    # could not find a free IP
-                    return None, _LOGGER.log("could not find a free public IP")
-                else:
-                    # TODO: implement different policies: random, prioritized, round robbin, etc.
-                    selected_ip = free_ips[random.randint(0, len(free_ips) - 1)]
-        else:
-            public_ips = {}
-            if private_ip in self._private2public:
-                if 0 in self._private2public[private_ip]:
-                    ep = (self._private2public[private_ip])[0]
-                    return None, _LOGGER.log("requested a public ip for %s:%d while the whole ip is redirected from %s" % (private_ip, private_port, ep.public_ip), logging.WARNING)
-
-                for port, ep in self._private2public[private_ip].items():
-                    if ep.public_ip not in public_ips:
-                        public_ips[ep.public_ip] = 0
-                    public_ips[ep.public_ip] += 1
-    
-                ip_list = [ (ip, public_ips[ip]) for ip in public_ips ]
-            else:
-                ip_list = []
-    
-            if len(ip_list) == 0:
-                # The private IP has not been redirected, yet... let's find an IP that does not has the port redirected
-                for ip in self._public2private:
-                    if 0 not in self._public2private[ip]:
-                        if public_port not in self._public2private[ip]:
-                            ip_list.append((ip, -len(self._public2private[ip])))
-    
-            if len(ip_list) == 0:
-                return None, _LOGGER.log("requested a redirection for %s:%d but we have not free public ips" % (private_ip, private_port), logging.WARNING)
             
-            ip_sorted = sorted(ip_list, key = lambda ip : ip[1])
-            (selected_ip, _) = ip_sorted[0]
-        
-        return Endpoint(selected_ip, public_port, private_ip, private_port), ""
-    
     def _add_ep(self, endpoint):
         '''
         This method stores an endpoint in the manager. WARNING: this method overwrites the existing peers (i.e. does
@@ -390,6 +390,9 @@ class EndpointManager():
         
         if endpoint.public_ip not in self._public2private:
             return False, _LOGGER.log("tried to redirect a public ip that it is not managed by us", logging.ERROR)
+        
+        if not self._ip_in_ranges(endpoint.private_ip):
+            return False, _LOGGER.log("tried to redirect to an ip that is not in any of the private ranges", logging.ERROR)
         
         if endpoint.private_ip not in self._private2public:
             self._private2public[endpoint.private_ip] = {}
@@ -455,6 +458,7 @@ class EndpointManager():
         if ip in ep_list:
             if 0 in ep_list[ip]: return False
             if port in ep_list[ip]: return False
+            if (len(ep_list[ip]) > 0) and (port == 0): return False
         else:
             if consider_available_if_ip_not_exists:
                 return True
@@ -484,8 +488,8 @@ class EndpointManager():
         ep_list = [ ep for _,ep in ep_list.items() ]
         error = False
         for ep in ep_list:
-	    result, _ = self.terminate_endpoint(ep)
-	    if not result:
+            result, _ = self.terminate_endpoint(ep)
+            if not result:
                 error = True
                 _LOGGER.error("failed to remove endpoint: %s" % ep)
         return (not error)
@@ -503,7 +507,13 @@ class EndpointManager():
         '''
         This function applies an endpoint (if it is possible), and stores it in the data structures.
         * if presist is set to True it will be saved in the database. Otherwise it won't be (it should only be not persisted when it is loaded from the db)
-        '''        
+        '''
+        if (ep.public_port == 0 and ep.private_port != 0) or (ep.public_port != 0 and ep.private_port == 0):
+            return False, _LOGGER.log("one-to-all redirections are not allowed")
+        
+        if not self._ip_in_ranges(ep.private_ip):
+            return False, _LOGGER.log("tried to redirect to an ip that is not in any of the private ranges", logging.ERROR)
+        
         if not self._private_available(ep.private_ip, ep.private_port):            
             return False, _LOGGER.log("tried to apply a redirection to %s:%d but it is already occupied" % (ep.private_ip, ep.private_port), logging.WARNING)
 
@@ -519,20 +529,124 @@ class EndpointManager():
         else:
             return False, msg
     
-    def request_endpoint(self, private_ip, private_port, public_port = -1):
+    def request_endpoint(self, public_ip, public_port, private_ip, private_port):
         '''
-        This function requests an IP for a pair private_ip:private_port, and returns the corresponding endpoint.
-        '''        
+        This function requests a redirection from public_ip:public_port to private_ip:private_port
+        * public_ip and public_port can be set to None, and this method will try to find an option.
+        
+        @return values: possible endpoint list, reason (if the list is empty)
+        '''
+        # _LOGGER.log("%s:%s -> %s:%s" % (public_ip, public_port, private_ip, private_port))
+        if not self._ip_in_ranges(private_ip):
+            return [], _LOGGER.log("tried to redirect to an ip that is not in any of the private ranges", logging.ERROR)
+
+        if private_ip is None or private_port is None:
+            return [], _LOGGER.log("requesting an incorrect redirection to %s:%d" % (private_ip, private_port), logging.WARNING)
+
         if not self._private_available(private_ip, private_port):
-            return None, _LOGGER.log("requesting a redirection to %s:%d, but it is already occupied" % (private_ip, private_port), logging.WARNING)
+            return [], _LOGGER.log("requested a redirection to %s:%s but it is already occupied" % (private_ip, private_port), logging.WARNING)
         
-        return self._select_public_ip(private_ip, private_port, public_port)
+        if (private_port == 0) and (public_port is None):
+            public_port = private_port
+
+        try:
+            if public_port is not None:
+                public_port = int(public_port)
+            private_port = int(private_port)
+        except:
+            return [], _LOGGER.log("incorrect port format (it must be an integer)", logging.ERROR)
         
-    def terminate_redirection(self, private_ip, private_port):
+        if ((private_port == 0) and (public_port != 0)) or ((private_port != 0) and (public_port == 0)):
+            return [], _LOGGER.log("requested a redirection to a whole IP but stated a single public port... only all-to-all or one-to-one redirections are allowed", logging.WARNING)
+        
+        preferred = []
+        if public_ip is None:
+            # Let's check from which IPs has been redirected the private IP
+            ip_list = []
+            if private_ip in self._private2public:
+                public_ips = {}
+                eps = self._private2public[private_ip]
+                for port, ep in eps.items():
+                    if ep.public_ip not in public_ips:
+                        public_ips[ep.public_ip] = 0
+                    public_ips[ep.public_ip]+=1
+                    
+                ip_list = [ (ip, public_ips[ip]) for ip in public_ips ]
+                ip_sorted = sorted(ip_list, key = lambda ip : ip[1])
+                ip_list = [ ip for (ip, _) in ip_sorted ]
+
+            # If any of the already assigned IP has the private port free, we'll use it
+            wanted_port = public_port
+            if wanted_port is None:
+                wanted_port = private_port
+                
+            # Let's make two lists of the possible IP:port pairs.
+            # - possible_endpoints are the possible endpoints in which the desired port is free for the IP
+            # - other_possible_endpoints are some other endpoints which are free, but the desired port was not free and other port is provided
+            possible_endpoints = []
+            other_possible_endpoints = []
+            for ip in ip_list + [ ip for ip in self._public2private if ip not in ip_list ]:
+                eps = self._public2private[ip]
+                if 0 not in eps:
+                    if wanted_port not in eps:
+                        possible_endpoints.append(Endpoint(ip, wanted_port, private_ip, private_port))
+                    else:
+                        other_possible_endpoints.append(Endpoint(ip, self._assign_port(ip, wanted_port), private_ip, private_port))
+
+            if public_port is None:
+                # No matter which is the public IP nor the public port, so we'll provide some options
+                if (len(possible_endpoints) == 0) and (len(other_possible_endpoints) == 0):
+                    return [], _LOGGER.log("could not find any free ip or port")
+                return possible_endpoints + other_possible_endpoints, ""
+            else:
+                # No matter which is the public IP but the public port is fixed
+                if len(possible_endpoints) == 0:
+                    return [], _LOGGER.log("could not find any free ip for that port")
+                return possible_endpoints, ""
+        else:
+            if public_port is None:
+                # The public IP is fixed, but the public port is not.
+                if public_ip not in self._public2private:
+                    return [], _LOGGER.log("requested a redirection from %s but the ip is not managed by ipfloater" % (public_ip), logging.WARNING)
+                
+                # We'll try to assign a port using the heuristics (the default assigns the desired port if it is free)
+                public_port = self._assign_port(public_ip, private_port)
+                
+                return [ Endpoint(public_ip, public_port, private_ip, private_port)], ""
+            else:
+                # Both the public IP and the port are fixed, so we won't create the endpoint unless it is available
+                if not self._public_available(public_ip, public_port):
+                    return [], _LOGGER.log("requested a redirection from %s:%d but it is either occupied or the ip is not managed by ipfloater" % (public_ip, public_port), logging.WARNING)
+                return [ Endpoint(public_ip, public_port, private_ip, private_port) ], ""
+            
+    def _assign_port(self, public_ip, wanted_port):
+        '''
+        This method is included as a particular mechanism to enable including heuristics to assign pseudorandom ports
+          - eg. if wanted 80, try to deliver the 8080, or the 10080, etc.
+        '''
+        if wanted_port not in self._public2private[public_ip]:
+            return wanted_port
+        
+        rand_port = random.randint(1025, 65535)
+        while rand_port in self._public2private[public_ip]:
+            rand_port = random.randint(1025, 65535)
+        return rand_port
+                    
+    def terminate_redirection_to(self, private_ip, private_port):
         '''
         This function deletes the redirection to the private_ip:private_port, if it exists.
         '''
         ep = self._get_ep_from_private(private_ip, private_port)
+        if ep is None:
+            return False
+        
+        return self._remove_ep(ep)
+
+    def terminate_redirection_from(self, public_ip, public_port):
+        '''
+        This function deletes the redirection from the public_ip:public_port, if it exists.
+        '''
+        ep = self._get_ep_from_public(public_ip, public_port)
         if ep is None:
             return False
         
@@ -569,31 +683,31 @@ class EndpointManager():
             return False, _LOGGER.log("tried to remove redirections from ip %s but it is not managed by me" % public_ip)
         return self._remove_eps_from_list(self._public2private[public_ip]), _LOGGER.log("endpoints successfully removed")
 
-    def get_endpoints(self):
+    def get_endpoints(self, json = False):
         eps = {}
         for ip, endpoints in self._private2public.items():
             for _, ep in endpoints.items():
-                eps[ep.id] = ep.to_json()
+                eps[ep.id] = ep.to_json() if json else ep
             
         return eps
     
-    def get_endpoints_from_public(self):
+    def get_endpoints_from_public(self, json = False):
         eps = {}
         for ip, endpoints in self._public2private.items():
             redirs = {}
             for _, ep in endpoints.items():
-                redirs[ep.public_port] = ep.to_json()
+                redirs[ep.public_port] = ep.to_json() if json else ep
 
             eps[ip] = redirs
             
         return eps
     
-    def get_endpoints_from_private(self):
+    def get_endpoints_from_private(self, json = False):
         eps = {}
         for ip, endpoints in self._private2public.items():
             redirs = {}
             for _, ep in endpoints.items():
-                redirs[ep.private_port] = ep.to_json()
+                redirs[ep.private_port] = ep.to_json() if json else ep
             eps[ip] = redirs
             
         return eps

@@ -41,5 +41,5 @@ setup(name='ipfloater',
       packages = [ 'ipfloater' ],
       package_dir = { 'ipfloater' : '.'},
       download_url = 'https://github.com/dealfonso/ipfloater',
-      install_requires = [ 'cpyutils >= 0.10' ]
+      install_requires = [ 'cpyutils >= 0.12' ]
 )

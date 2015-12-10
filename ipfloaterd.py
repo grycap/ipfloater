@@ -38,6 +38,12 @@ In the awful case that a uuid already exists in the iptables table, how should t
 OVERWRITE_RULES=True
 
 _LOGGER = cpyutils.log.Log("IPFLOATER")
+
+def get_endpoint_manager():
+    global _ENDPOINT_MANAGER
+    return _ENDPOINT_MANAGER
+
+
 _ENDPOINT_MANAGER = None
 
 def query_endpoint(dst_ip, dst_port, register = True):
@@ -46,24 +52,46 @@ def query_endpoint(dst_ip, dst_port, register = True):
     if _ENDPOINT_MANAGER is None:
         return False, "Endpoint Manager not found"
     
-    ep, info = _ENDPOINT_MANAGER.request_endpoint(dst_ip, dst_port)
-    if ep is None:
+    ep, info = _ENDPOINT_MANAGER.request_endpoint(None, None, dst_ip, dst_port)
+    if len(ep) == 0:
         return False, "Could not obtain a redirection for %s:%d (%s)" % (dst_ip, dst_port, info)
     
     if register:
+        ep = ep[0]
         result, msg = _ENDPOINT_MANAGER.apply_endpoint(ep)
         if not result:
             return False, "Could not apply the redirection %s (%s)" % (ep, msg)
 
     return True, ep
 
-def unregister_endpoint(dst_ip, dst_port):
+def unregister_redirection_to(dst_ip, dst_port):
     if _ENDPOINT_MANAGER is None:
         return False, "Endpoint Manager not found"
 
-    ep = _ENDPOINT_MANAGER.terminate_redirection(dst_ip, dst_port)
-    if ep is None:
+    result = _ENDPOINT_MANAGER.terminate_redirection_to(dst_ip, dst_port)
+    if not result:
         return False, "Could not delete the redirection to %s:%d. Does it exist?" % (dst_ip, dst_port)
+    
+    return True, "Redirection %s unregistered" % ep
+
+def unregister_redirection_from(public_ip, public_port):
+    if _ENDPOINT_MANAGER is None:
+        return False, "Endpoint Manager not found"
+
+    result = _ENDPOINT_MANAGER.terminate_redirection_from(public_ip, public_port)
+    if not result:
+        return False, "Could not delete the redirection from %s:%d. Does it exist?" % (public_ip, public_port)
+    
+    return True, "Redirection %s unregistered" % ep
+
+def unregister_redirection(public_ip, public_port, private_ip, private_port):
+    if _ENDPOINT_MANAGER is None:
+        return False, "Endpoint Manager not found"
+
+    ep = Endpoint(public_ip, public_port, private_ip, private_port)
+    result = _ENDPOINT_MANAGER.terminate_endpoint(ep)
+    if not result:
+        return False, "Could not delete the redirection %s. Does it exist?" % (str(ep))
     
     return True, "Redirection %s unregistered" % ep
 
@@ -97,103 +125,6 @@ def get_version():
 def get_redirections():
     return str(_ENDPOINT_MANAGER)
 
-import cpyutils.restutils
-app = cpyutils.restutils.get_app()
-
-@app.route('/redirections/')
-def get_endpoints():
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-    return cpyutils.restutils.response_json(_ENDPOINT_MANAGER.get_endpoints())
-
-@app.route('/public/')
-def get_public_redirections():
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-    return cpyutils.restutils.response_json(_ENDPOINT_MANAGER.get_endpoints_from_public())
-
-@app.route('/public/:ip')
-def get_public_redirections(ip):
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-    eps = _ENDPOINT_MANAGER.get_endpoints_from_public()
-    if ip in eps:
-        return cpyutils.restutils.response_json(eps[ip])
-    else:
-        return cpyutils.restutils.error(404, "IP %s not found" % ip)
-
-def create_public_redirection(ip_pub, port_pub, ip_priv, port_priv):
-    '''
-    This method requests a whole specific public IP to be redirected to a private IP
-    '''
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-    return cpyutils.restutils.error(404, "Not implemented")
-
-@app.route('/public/:ip_pub/:port_pub/redirect/:ip_priv/:port_priv', method = 'PUT')
-def create_public_redirection(ip_pub, port_pub, ip_priv, port_priv):
-    ''' PUT {ip, port} (crea una redireccion a "ip:port") '''
-    return create_public_redirection(ip_pub, port_pub, ip_priv, port_priv)
-@app.route('/public/any/:port_pub/redirect/:ip_priv/:port_priv', method = 'PUT')
-def create_public_redirection(port_pub, ip_priv, port_priv):
-    ''' PUT {ip, port} (crea una redireccion a "ip:port", y le da igual la ip que le den) '''
-    return create_public_redirection(None, port_pub, ip_priv, port_priv)
-@app.route('/public/:ip_pub/redirect/:ip_priv/:port_priv', method = 'PUT')
-def create_public_redirection(ip_pub, ip_priv, port_priv):
-    ''' PUT {ip, port} (crea una redireccion a "ip:port", y le da igual el puerto que le den) '''
-    return create_public_redirection(ip_pub, None, ip_priv, port_priv)
-@app.route('/public/redirect/:ip_priv/:port_priv', method = 'PUT')
-def create_public_redirection(ip_priv, port_priv):
-    ''' PUT {ip, port} (crea una redireccion a "ip:port", y le da igual la ip y el puerto que le den) '''
-    return create_public_redirection(None, None, ip_priv, port_priv)
-
-@app.route('/public/:ip/:port')
-def get_public_redirections(ip, port):
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-    try:
-        port = int(port.strip("/"))
-    except:
-        return cpyutils.restutils.error(400, "Malformed request: port is an integer")
-    
-    eps = _ENDPOINT_MANAGER.get_endpoints_from_public()
-    if (ip in eps) and (port in (eps[ip])):
-        return cpyutils.restutils.response_json((eps[ip])[port])
-    else:
-        return cpyutils.restutils.error(404, "redirection not found")
-
-@app.route('/private/')
-def get_private_redirections():
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-    return cpyutils.restutils.response_json(_ENDPOINT_MANAGER.get_endpoints_from_private())
-
-@app.route('/private/:ip')
-def get_private_redirections(ip):
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-    eps = _ENDPOINT_MANAGER.get_endpoints_from_private()
-    if ip in eps:
-        return cpyutils.restutils.response_json(eps[ip])
-    else:
-        return cpyutils.restutils.error(404, "IP %s not found" % ip)
-
-@app.route('/private/:ip/:port')
-def get_public_redirections(ip, port):
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-    
-    try:
-        port = int(port.strip("/"))
-    except:
-        return cpyutils.restutils.error(400, "Malformed request: port is an integer")
-    
-    eps = _ENDPOINT_MANAGER.get_endpoints_from_private()
-    if (ip in eps) and (port in (eps[ip])):
-        return cpyutils.restutils.response_json((eps[ip])[port])
-    else:
-        return cpyutils.restutils.error(404, "redirection not found")
-
 def main_loop():
     global _ENDPOINT_MANAGER
     eventloop.create_eventloop(True)
@@ -201,8 +132,10 @@ def main_loop():
     ap = CmdLineParser("ipfloater", "This is a server that deals with iptables to enable floating IPs in private networks", [
         Flag("--remove-endpoints", "-r", "Remove the endpoints that are in the iptables tables that seem to have been created in other session", default = config.config.REMOVE_AT_BOOT),
         Parameter("--db", "-d", "The path for the persistence file", 1, False, [config.config.DB]),
-        Parameter("--listen-ip", "-i", "The ip adress in which ipfloater will listen", 1, False, [ config.config.LISTEN_IP ]),
-        Parameter("--listen-port", "-p", "The ip port in which ipfloater will listen", 1, False, [ config.config.LISTEN_PORT ]),
+        Parameter("--listen-ip", "-i", "The ip adress in which ipfloater will listen for xmlrpc requests", 1, False, [ config.config.LISTEN_IP ]),
+        Parameter("--listen-port", "-p", "The ip port in which ipfloater will listen for xmlrpc requests", 1, False, [ config.config.LISTEN_PORT ]),
+        Parameter("--rest-ip", "-s", "The ip adress in which ipfloater will listen for restful requests", 1, False, [ config.config.REST_IP ]),
+        Parameter("--rest-port", "-t", "The ip port in which ipfloater will listen for restful requests", 1, False, [ config.config.REST_PORT ]),
     ])
 
     parsed, result, info = ap.parse(sys.argv[1:])
@@ -223,8 +156,12 @@ def main_loop():
     # TODO: persist in database
     for ip in config.config.IP_POOL:
         _ENDPOINT_MANAGER.add_public_ip(ip)
+        
+    for ipmask in config.config.PRIVATE_IP_RANGES:
+        _ENDPOINT_MANAGER.add_private_range(ipmask)
     
-    if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [query_endpoint, unregister_endpoint, clean_private_ip, clean_public_ip, get_version, get_redirections, get_public_ips]):
+    
+    if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [query_endpoint, unregister_redirection, unregister_redirection_from, unregister_redirection_to, clean_private_ip, clean_public_ip, get_version, get_redirections, get_public_ips]):
         _LOGGER.error("could not setup the service")
         raise Exception("could not setup the service")
 
@@ -234,7 +171,18 @@ def main_loop():
     _ENDPOINT_MANAGER.get_data_from_db()
     _LOGGER.info("server running in %s:%d" % (SERVER, PORT))
 
-    cpyutils.restutils.run_in_thread("0.0.0.0", 7001)
+    RESTIP=result.values['--rest-ip'][0]
+    RESTPORT=result.values['--rest-port'][0]
+    try:
+        RESTPORT = int(RESTPORT)
+    except:
+        RESTPORT = 0
+        
+    if (RESTIP is not None) and (RESTIP != "") and (RESTPORT > 0):
+        import restserver
+        import cpyutils.restutils
+        cpyutils.restutils.run_in_thread(RESTIP, RESTPORT)
+        _LOGGER.info("REST server running in %s:%d" % (RESTIP, RESTPORT))
 
     eventloop.get_eventloop().loop()
 

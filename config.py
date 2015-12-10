@@ -24,6 +24,7 @@ cpyutils.config.set_main_config_file("ipfloaterd.conf")
 class IPFloaterConfig(cpyutils.config.Configuration):
     def parse(self):
         self.IP_POOL = cpyutils.config.Configuration.str2list(self.IP_POOL)
+        self.PRIVATE_IP_RANGES = cpyutils.config.Configuration.str2list(self.PRIVATE_IP_RANGES)
 
 config = IPFloaterConfig(
     "IPFLOATER",
@@ -31,8 +32,11 @@ config = IPFloaterConfig(
         "IP_POOL": "",
         "LISTEN_IP": "127.0.0.1",
         "LISTEN_PORT": 7000,
+        "REST_IP": "127.0.0.1",
+        "REST_PORT": 7002,
         "REMOVE_AT_BOOT": True,
-        "DB": "mysql:///var/lib/ipfloater/ipfloater.db",
+        "DB": "sqlite:///var/lib/ipfloater/ipfloater.db",
+        "PRIVATE_IP_RANGES": ""
     },
     callback = IPFloaterConfig.parse
 )
