@@ -49,6 +49,17 @@ def get_public_redirections(ip):
         #  this is to enable semantics for the /redirect/ predicate to create redirections
         return cpyutils.restutils.response_json({})
 
+@app.route('/arp/:mac')
+def get_mac(mac):
+    _ARP_TABLE = ipfloaterd.get_arp_table()
+    if _ARP_TABLE is None:
+        return cpyutils.restutils.error(500, "ARP table not found")
+    ip = _ARP_TABLE.get_ip(mac)
+    if ip is not None:
+        return cpyutils.restutils.response_txt(ip)
+    else:
+        return cpyutils.restutils.error(404, "Could not get the information for mac %s" % (mac))
+
 @app.route('/public/:ip/:port')
 def get_public_redirections(ip, port):
     _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()

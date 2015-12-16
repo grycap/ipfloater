@@ -72,6 +72,13 @@ def main_function():
                 return True, "Client version: %s\nServer version: %s" % (version.get(), server_version)
             except:
                 return True, "Client version: %s\nCould not contact server" % version.get()
+        def arp(self, parse_result, error):
+            mac = parse_result.values['mac'][0]
+            result, ip = self._XMLRPC_SERVER.arp(mac)
+            if result:
+                return True, "%s" % (ip)
+            else:
+                return False, "Failed to get the ip address for %s (server responded: %s)" % (mac, ip)
     
     ap = IPFloaterCmdLine("ipfloater", "This the client for ipfloaterd, which is a server that deals with iptables to enable floating IPs in private networks", [
         Parameter("--server-ip", "-i", "The ip adress in which ipfloater listens", 1, False, ["127.0.0.1"]),
@@ -85,6 +92,9 @@ def main_function():
             Operation("status", desc = "Gets the status of the redirections"),
             Operation("version", desc = "Gets the version of the client and the server"),
             Operation("ippool", desc = "Gets the public ip addresses in the pool"),
+            Operation("arp", desc = "Requests the IP for a MAC address", arguments = [
+                Argument("mac", "the mac address for which is requested the ip", mandatory = True, count = 1),
+            ]),
     ])
 
     ap.self_service(True)

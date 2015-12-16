@@ -30,6 +30,7 @@ config = IPFloaterConfig(
     "IPFLOATER",
     {
         "IP_POOL": "",
+        "IP_POOL_FILE": "",
         "LISTEN_IP": "127.0.0.1",
         "LISTEN_PORT": 7000,
         "REST_IP": "127.0.0.1",

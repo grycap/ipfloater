@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # 
+import config
 import sys
 import version
 from cpyutils.parameters import CmdLineParser, Flag, Parameter, Argument
@@ -26,8 +27,11 @@ import cpyutils.xmlrpcutils as xmlrpcutils
 import cpyutils.log
 import cpyutils.config
 import endpoint
-import config
 import iptables
+import arptable
+import os
+from cpyutils.iputils import check_ip
+import signal
 
 '''
 In the awful case that a uuid already exists in the iptables table, how should the endpoint proceed? The
@@ -43,8 +47,12 @@ def get_endpoint_manager():
     global _ENDPOINT_MANAGER
     return _ENDPOINT_MANAGER
 
+def get_arp_table():
+    global _ARP_TABLE
+    return _ARP_TABLE
 
 _ENDPOINT_MANAGER = None
+_ARP_TABLE = None
 
 def query_endpoint(dst_ip, dst_port, register = True):
     '''
@@ -113,6 +121,17 @@ def clean_public_ip(public_ip):
     
     return True, "Redirections from %s unregistered" % public_ip
 
+def arp(mac):
+    global _ARP_TABLE
+    if _ARP_TABLE is None:
+        return False, "ARP table not found"
+
+    ip = _ARP_TABLE.get_ip(mac)
+    if ip is None:
+        return False, "Could not get the IP address for %s" % (mac)
+    
+    return True, ip
+
 def get_public_ips():
     if _ENDPOINT_MANAGER is None:
         return False, "Endpoint Manager not found"
@@ -125,8 +144,13 @@ def get_version():
 def get_redirections():
     return str(_ENDPOINT_MANAGER)
 
+def handler_sigint(signal, frame):
+    _LOGGER.info("removing iptables rules")
+    iptables.find_endpointchains_and_remove()
+    sys.exit(0)
+
 def main_loop():
-    global _ENDPOINT_MANAGER
+    global _ENDPOINT_MANAGER, _ARP_TABLE
     eventloop.create_eventloop(True)
     
     ap = CmdLineParser("ipfloater", "This is a server that deals with iptables to enable floating IPs in private networks", [
@@ -136,7 +160,12 @@ def main_loop():
         Parameter("--listen-port", "-p", "The ip port in which ipfloater will listen for xmlrpc requests", 1, False, [ config.config.LISTEN_PORT ]),
         Parameter("--rest-ip", "-s", "The ip adress in which ipfloater will listen for restful requests", 1, False, [ config.config.REST_IP ]),
         Parameter("--rest-port", "-t", "The ip port in which ipfloater will listen for restful requests", 1, False, [ config.config.REST_PORT ]),
+        Parameter("--arp-table", "-a", "The file that contains a set of whitespace separated pairs MAC IP that will be used to resolve arp requests. The IPs will also be added to the IP pool.", 1, False, [ config.config.IP_POOL_FILE ]),
     ])
+    
+    # Will try to exit removing the iptables rules
+    signal.signal(signal.SIGINT, handler_sigint)
+    signal.signal(signal.SIGTERM, handler_sigint)
 
     parsed, result, info = ap.parse(sys.argv[1:])
     if not parsed:
@@ -153,6 +182,16 @@ def main_loop():
     
     _ENDPOINT_MANAGER = endpoint.EndpointManager(result.values['--db'][0])
     
+    _ARP_TABLE = arptable.ARPTable()
+    arp_filename = result.values['--arp-table'][0]
+    if arp_filename != "":
+        arp_filename = os.path.expanduser(os.path.expandvars(arp_filename))
+        if _ARP_TABLE.read_from_file(arp_filename) is not None:
+            for ip in _ARP_TABLE.get_ips():
+                _ENDPOINT_MANAGER.add_public_ip(ip)
+            for ip in _ARP_TABLE.get_ips_without_mac():
+                _ENDPOINT_MANAGER.add_public_ip(ip)
+    
     # TODO: persist in database
     for ip in config.config.IP_POOL:
         _ENDPOINT_MANAGER.add_public_ip(ip)
@@ -160,8 +199,7 @@ def main_loop():
     for ipmask in config.config.PRIVATE_IP_RANGES:
         _ENDPOINT_MANAGER.add_private_range(ipmask)
     
-    
-    if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [query_endpoint, unregister_redirection, unregister_redirection_from, unregister_redirection_to, clean_private_ip, clean_public_ip, get_version, get_redirections, get_public_ips]):
+    if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [arp, query_endpoint, unregister_redirection, unregister_redirection_from, unregister_redirection_to, clean_private_ip, clean_public_ip, get_version, get_redirections, get_public_ips]):
         _LOGGER.error("could not setup the service")
         raise Exception("could not setup the service")
 

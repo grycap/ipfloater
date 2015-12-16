@@ -24,46 +24,9 @@ import iptables
 import cpyutils.db
 import iptc
 import time
+import cpyutils.iputils
 
 _LOGGER = cpyutils.log.Log("ep")
-
-def _ip2hex(ip):
-    parts = ip.split(".")
-    if len(parts) != 4: return None
-    ipv = 0
-    for part in parts:
-        try:
-            p = int(part)
-            ipv = (ipv << 8) + p
-        except:
-            return None
-    return ipv
-
-def str_to_ipmask(ipmask):
-    v = ipmask.split("/")
-    if len(v) > 2: raise Exception("bad mask format")
-    mask_ip = _ip2hex(v[0])
-    if mask_ip is None: raise Exception("bad mask format")
-    mask = v[1] if len(v) == 2 else 32
-    try:
-        mask = (0xffffffff00000000 >> int(mask)) & 0xffffffff
-    except:
-        mask = _ip2hex(v[1])
-    
-    if mask is None: raise Exception("bad mask format")
-    return mask_ip, mask
-
-
-def ip_in_ip_mask(ip, mask_ip, mask):
-    ip = _ip2hex(ip)
-    if ip is None: raise Exception("bad ip format")
-    if (mask_ip & mask) == (ip & mask):
-        return True
-    return False
-
-def ip_in_ipmask(ip, ipmask):
-    mask_ip, mask = str_to_ipmask(ipmask)
-    return ip_in_ip_maks(ip, mask_ip, mask)
 
 class Endpoint(object):
     @staticmethod
@@ -271,7 +234,7 @@ class EndpointManager():
     def _ip_in_ranges(self, ip):
         # We'll check if the ip is in any of the ranges controlled by the manager
         for (mask_ip, mask) in self._private_ip_ranges:
-            if ip_in_ip_mask(ip, mask_ip, mask):
+            if cpyutils.iputils.ip_in_ip_mask(ip, mask_ip, mask):
                 return True
         return False
     
@@ -299,7 +262,7 @@ class EndpointManager():
     
     def add_private_range(self, ipmask):
         try:
-            mask_ip, mask = str_to_ipmask(ipmask)
+            mask_ip, mask = cpyutils.iputils.str_to_ipmask(ipmask)
         except:
             return False
         _LOGGER.log("range %s successfully added" % ipmask)
@@ -371,6 +334,10 @@ class EndpointManager():
         '''
         This method adds a new public ip to the pool of public ips that are available for redirections
         '''
+        ip = cpyutils.iputils.check_ip(ip)
+        if ip is None:
+            return False
+        
         if ip in self._public2private:
             return True
 
