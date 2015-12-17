@@ -31,7 +31,7 @@ _LOGGER = cpyutils.log.Log("ep")
 class Endpoint(object):
     @staticmethod
     def get_id():
-        return str(uuid.uuid4())[:8]
+        return str(uuid.uuid4())[:6]
 
     def to_json(self):
         return {'id': self.id,
@@ -62,6 +62,9 @@ class Endpoint(object):
         This method executes the needed funtions to create the iptables rules that will make possible the redirection stated by the endpoint.
           The method is able to detect wether the names of the rules are already occupied or not. If the names needed for the rules are occuppied,
           depending on the configuration, the method will delete the existing rules or not.
+          
+        # solucion de nat loopback: en postrouting, si el source es la LAN y el destino es     
+        # iptables -t nat -A ipfl-rule-0-POSTROUTING -s 10.3.0.5/24 -d 10.3.0.5/32 -p tcp --dport 22 -j SNAT --to-source 10.0.0.69
         '''
         result, msg = True, ""
         table = iptc.Table(iptc.Table.NAT)
@@ -70,31 +73,31 @@ class Endpoint(object):
         rule_return = iptc.Rule()
         rule_return.target = iptc.Target(rule_return, "RETURN")
 
-        try:
+        if True:
             # OUTPUT Rules
-            if (iptables.chain_exists(table, "rule-%s-OUTPUT" % self.id)):
+            if (iptables.chain_exists(table, "ipfl-rule-%s-OUTPUT" % self.id)):
                 if OVERWRITE_RULES:
-                    iptables.unlink_chains(table, "OUTPUT", "rule-%s-OUTPUT" % self.id)
-                    iptables.delete_chain(table, "rule-%s-OUTPUT" % self.id)
+                    iptables.unlink_chains(table, "ipfloater-OUTPUT", "ipfl-rule-%s-OUTPUT" % self.id)
+                    iptables.delete_chain(table, "ipfl-rule-%s-OUTPUT" % self.id)
                 else:
-                    msg = _LOGGER.log("chain rule-%s-OUTPUT already exists" % self.id, logging.WARNING)
+                    msg = _LOGGER.log("chain ipfl-rule-%s-OUTPUT already exists" % self.id, logging.WARNING)
                     raise Exception(msg)
-            if (iptables.chain_exists(table, "rule-%s-PREROUTING" % self.id)):
+            if (iptables.chain_exists(table, "ipfl-rule-%s-PREROUTING" % self.id)):
                 if OVERWRITE_RULES:
-                    iptables.unlink_chains(table, "PREROUTING", "rule-%s-PREROUTING" % self.id)
-                    iptables.delete_chain(table, "rule-%s-PREROUTING" % self.id)
+                    iptables.unlink_chains(table, "ipfloater-PREROUTING", "ipfl-rule-%s-PREROUTING" % self.id)
+                    iptables.delete_chain(table, "ipfl-rule-%s-PREROUTING" % self.id)
                 else:
-                    msg = _LOGGER.log("chain rule-%s-PREROUTING already exists" % self.id, logging.WARNING)
+                    msg = _LOGGER.log("chain ipfl-rule-%s-PREROUTING already exists" % self.id, logging.WARNING)
                     raise Exception(msg)
-            if (iptables.chain_exists(table, "rule-%s-POSTROUTING" % self.id)):
+            if (iptables.chain_exists(table, "ipfl-rule-%s-POSTROUTING" % self.id)):
                 if OVERWRITE_RULES:
-                    iptables.unlink_chains(table, "POSTROUTING", "rule-%s-POSTROUTING" % self.id)
-                    iptables.delete_chain(table, "rule-%s-POSTROUTING" % self.id)
+                    iptables.unlink_chains(table, "ipfloater-POSTROUTING", "ipfl-rule-%s-POSTROUTING" % self.id)
+                    iptables.delete_chain(table, "ipfl-rule-%s-POSTROUTING" % self.id)
                 else:
-                    msg = _LOGGER.log("chain rule-%s-POSTROUTING already exists" % self.id, logging.WARNING)
+                    msg = _LOGGER.log("chain ipfl-rule-%s-POSTROUTING already exists" % self.id, logging.WARNING)
                     raise Exception(msg)
             
-            chain_out = table.create_chain("rule-%s-OUTPUT" % self.id)
+            chain_out = table.create_chain("ipfl-rule-%s-OUTPUT" % self.id)
             rule_out = iptc.Rule()
             
             if self.private_port != 0:
@@ -110,18 +113,18 @@ class Endpoint(object):
             else:
                 rule_out.target.to_destination = "%s:%d" % (self.private_ip, self.private_port)
 
-            chain_out.insert_rule(rule_return)
-            chain_out.insert_rule(rule_out)
-            iptables.link_chains(table, "OUTPUT", "rule-%s-OUTPUT" % self.id)
+            chain_out.append_rule(rule_out)
+            # chain_out.append_rule(rule_return)
+            iptables.link_chains(table, "ipfloater-OUTPUT", "ipfl-rule-%s-OUTPUT" % self.id)
 
             # PREROUTING RULES
-            chain_pre = table.create_chain("rule-%s-PREROUTING" % self.id)
-            chain_pre.insert_rule(rule_return)
-            chain_pre.insert_rule(rule_out)
-            iptables.link_chains(table, "PREROUTING", "rule-%s-PREROUTING" % self.id)
+            chain_pre = table.create_chain("ipfl-rule-%s-PREROUTING" % self.id)
+            chain_pre.append_rule(rule_out)
+            # chain_pre.append_rule(rule_return)
+            iptables.link_chains(table, "ipfloater-PREROUTING", "ipfl-rule-%s-PREROUTING" % self.id)
 
             # POSTROUTING RULES
-            chain_post = table.create_chain("rule-%s-POSTROUTING" % self.id)
+            chain_post = table.create_chain("ipfl-rule-%s-POSTROUTING" % self.id)
             rule_post = iptc.Rule()
             
             if self.public_port != 0:
@@ -137,77 +140,18 @@ class Endpoint(object):
                 rule_post.target.to_source = self.public_ip
             else:
                 rule_post.target.to_source = "%s:%d" % (self.public_ip, self.public_port)
-            chain_post.insert_rule(rule_return)
-            chain_post.insert_rule(rule_post)
-            iptables.link_chains(table, "POSTROUTING", "rule-%s-POSTROUTING" % self.id)
+            chain_post.append_rule(rule_post)
+            #chain_post.append_rule(rule_return)
+            iptables.link_chains(table, "ipfloater-POSTROUTING", "ipfl-rule-%s-POSTROUTING" % self.id)
 
             table.commit()
             table.autocommit = True
+        try:
+            pass
         except:
             result = False
 
         return result, msg
-
-    def text_rules(self, new = True):
-        '''
-        This method outputs in text mode the rules that are needed to create the redirections that implement the endpoint.
-          In case that new is False, the output will be the instructions needed to remove the endpoint. The output of the
-          method can be issued to the commandline. 
-        '''
-        
-        head = "\
-iptables -t nat -N rule-%s-OUTPUT\n\
-iptables -t nat -N rule-%s-PREROUTING\n\
-iptables -t nat -N rule-%s-POSTROUTING\n\
-iptables -t nat -A OUTPUT -j rule-%s-OUTPUT\n\
-iptables -t nat -A PREROUTING -j rule-%s-PREROUTING\n\
-iptables -t nat -A POSTROUTING -j rule-%s-POSTROUTING\n\
-" % (self.id, self.id, self.id, self.id, self.id, self.id)
-        bottom = "\
-iptables -t nat -D OUTPUT -j rule-%s-OUTPUT\n\
-iptables -t nat -D PREROUTING -j rule-%s-PREROUTING\n\
-iptables -t nat -D POSTROUTING -j rule-%s-POSTROUTING\n\
-iptables -t nat -X rule-%s-OUTPUT\n\
-iptables -t nat -X rule-%s-PREROUTING\n\
-iptables -t nat -X rule-%s-POSTROUTING\
-" % (self.id, self.id, self.id, self.id, self.id, self.id)
-        if new:
-            action = "-A"
-            bottom = ""
-        else:
-            action = "-D"
-            head = ""
-            
-        # solucion de nat loopback: en postrouting, si el source es la LAN y el destino es     
-        # iptables -t nat -A rule-0-POSTROUTING -s 10.3.0.5/24 -d 10.3.0.5/32 -p tcp --dport 22 -j SNAT --to-source 10.0.0.69
-        
-        if (self.public_port == 0) and (self.private_port == 0):
-            # regla desde dentro, hacia dentro (para que no salga fuera de la red)
-            rule1 = "iptables -t nat %s rule-%s-OUTPUT -d %s/32 -j DNAT --to-destination %s" % (action, self.id, self.public_ip, self.private_ip)
-            rule1b = "iptables -t nat %s rule-%s-OUTPUT -j RETURN" % (action, self.id)
-            
-            # regla de si me viene desde fuera y el destino es la ip publica y el puerto indicado, que me haga DNAT cambiando el destino a la IP privada y el puerto redirigido
-            rule2 = "iptables -t nat %s rule-%s-PREROUTING -d %s/32 -j DNAT --to-destination %s" % (action, self.id, self.public_ip, self.private_ip)
-            rule2b = "iptables -t nat %s rule-%s-PREROUTING -j RETURN" % (action, self.id)
-            
-            rule3 = "iptables -t nat %s rule-%s-POSTROUTING -s %s/32 -j SNAT --to-source %s" % (action, self.id, self.private_ip, self.public_ip)
-            rule3b = "iptables -t nat %s rule-%s-POSTROUTING -j RETURN" % (action, self.id)
-        else:
-            # regla desde dentro, hacia dentro (para que no salga fuera de la red)
-            rule1 = "iptables -t nat %s rule-%s-OUTPUT -d %s/32 -p tcp --dport %d -j DNAT --to-destination %s:%d" % (action, self.id, self.public_ip, self.public_port, self.private_ip, self.private_port)
-            rule1b = "iptables -t nat %s rule-%s-OUTPUT -j RETURN" % (action, self.id)
-            
-            # regla de si me viene desde fuera y el destino es la ip publica y el puerto indicado, que me haga DNAT cambiando el destino a la IP privada y el puerto redirigido
-            rule2 = "iptables -t nat %s rule-%s-PREROUTING -d %s/32 -p tcp --dport %d -j DNAT --to-destination %s:%d" % (action, self.id, self.public_ip, self.public_port, self.private_ip, self.private_port)
-            rule2b = "iptables -t nat %s rule-%s-PREROUTING -j RETURN" % (action, self.id)
-            
-            rule3 = "iptables -t nat %s rule-%s-POSTROUTING -s %s/32 -p tcp --sport %d -j SNAT --to-source %s:%d" % (action, self.id, self.private_ip, self.public_port, self.public_ip, self.public_port)
-            rule3b = "iptables -t nat %s rule-%s-POSTROUTING -j RETURN" % (action, self.id)
-        return "%s%s\n%s\n%s\n%s\n%s\n%s\n%s" % (head, rule1, rule1b, rule2, rule2b, rule3, rule3b, bottom)
-
-    def __str__(self, ):
-        return "%s:%d -> %s:%d" % (self.public_ip, self.public_port, self.private_ip, self.private_port)
-    
 
 class EndpointManager():
     '''
@@ -390,7 +334,7 @@ class EndpointManager():
             
         return True
 
-    def _get_ep_from_private(self, private_ip, private_port):
+    def get_ep_from_private(self, private_ip, private_port):
         '''
         This method check whether there is a redirection to private_ip:private_port and returns it
         '''
@@ -402,7 +346,7 @@ class EndpointManager():
         
         return (self._private2public[private_ip])[private_port]
 
-    def _get_ep_from_public(self, public_ip, public_port):
+    def get_ep_from_public(self, public_ip, public_port):
         '''
         This method check whether there is a redirection from public_ip:public_port and returns it
         '''
@@ -465,7 +409,7 @@ class EndpointManager():
         '''
         This method returns the ep, in case that it exists. 
         '''
-        ex_ep = self._get_ep_from_private(ep.private_ip, ep.private_port)
+        ex_ep = self.get_ep_from_private(ep.private_ip, ep.private_port)
         if (ex_ep.public_ip != ep.public_ip) or (ex_ep.public_port != ep.public_port):
             return None
         return ex_ep
@@ -603,7 +547,7 @@ class EndpointManager():
         '''
         This function deletes the redirection to the private_ip:private_port, if it exists.
         '''
-        ep = self._get_ep_from_private(private_ip, private_port)
+        ep = self.get_ep_from_private(private_ip, private_port)
         if ep is None:
             return False
         
@@ -613,7 +557,7 @@ class EndpointManager():
         '''
         This function deletes the redirection from the public_ip:public_port, if it exists.
         '''
-        ep = self._get_ep_from_public(public_ip, public_port)
+        ep = self.get_ep_from_public(public_ip, public_port)
         if ep is None:
             return False
         

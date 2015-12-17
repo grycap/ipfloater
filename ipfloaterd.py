@@ -146,7 +146,8 @@ def get_redirections():
 
 def handler_sigint(signal, frame):
     _LOGGER.info("removing iptables rules")
-    iptables.find_endpointchains_and_remove()
+    iptables.cleanup_rules()
+    # iptables.find_endpointchains_and_remove()
     sys.exit(0)
 
 def main_loop():
@@ -154,7 +155,6 @@ def main_loop():
     eventloop.create_eventloop(True)
     
     ap = CmdLineParser("ipfloater", "This is a server that deals with iptables to enable floating IPs in private networks", [
-        Flag("--remove-endpoints", "-r", "Remove the endpoints that are in the iptables tables that seem to have been created in other session", default = config.config.REMOVE_AT_BOOT),
         Parameter("--db", "-d", "The path for the persistence file", 1, False, [config.config.DB]),
         Parameter("--listen-ip", "-i", "The ip adress in which ipfloater will listen for xmlrpc requests", 1, False, [ config.config.LISTEN_IP ]),
         Parameter("--listen-port", "-p", "The ip port in which ipfloater will listen for xmlrpc requests", 1, False, [ config.config.LISTEN_PORT ]),
@@ -178,7 +178,6 @@ def main_loop():
 
     SERVER=result.values['--listen-ip'][0]
     PORT=result.values['--listen-port'][0]
-    REMOVE_RULES_AT_BOOT=result.values['--remove-endpoints']
     
     _ENDPOINT_MANAGER = endpoint.EndpointManager(result.values['--db'][0])
     
@@ -203,8 +202,10 @@ def main_loop():
         _LOGGER.error("could not setup the service")
         raise Exception("could not setup the service")
 
-    if REMOVE_RULES_AT_BOOT:
-        iptables.find_endpointchains_and_remove()
+    #if REMOVE_RULES_AT_BOOT:
+    #    iptables.find_endpointchains_and_remove()
+    iptables.cleanup_rules()
+    iptables.setup_basic_rules()
         
     _ENDPOINT_MANAGER.get_data_from_db()
     _LOGGER.info("server running in %s:%d" % (SERVER, PORT))

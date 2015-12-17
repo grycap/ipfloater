@@ -22,6 +22,62 @@ import cpyutils.log
 
 _LOGGER = cpyutils.log.Log("IPT")
 
+def setup_basic_rules():
+    table = iptc.Table(iptc.Table.NAT)
+    table.refresh()
+    table.autocommit = False
+    chain_pos = table.create_chain("ipfloater-POSTROUTING")
+    chain_pre = table.create_chain("ipfloater-PREROUTING")
+    chain_out = table.create_chain("ipfloater-OUTPUT")
+    
+    # iptables -t nat -A POSTROUTING -m conntrack ! --ctstate DNAT -j ACCEPT
+    rule_pos = iptc.Rule()
+    rule_pos.create_target("ACCEPT")
+    m = rule_pos.create_match("conntrack")
+    m.ctstate = "!DNAT"
+    chain_pos.append_rule(rule_pos)
+        
+    link_chains(table, "POSTROUTING", "ipfloater-POSTROUTING")
+    link_chains(table, "PREROUTING", "ipfloater-PREROUTING")
+    link_chains(table, "OUTPUT", "ipfloater-OUTPUT")
+    table.commit()
+    table.autocommit = True
+
+def unlink_and_delete_chain(table, chainname):
+    linked_chain = None
+    if chainname[-7:] == "-OUTPUT":
+        linked_chain = "OUTPUT"
+    if chainname[-11:] == "-PREROUTING":
+        linked_chain = "PREROUTING"
+    if chainname[-12:] == "-POSTROUTING":
+        linked_chain = "POSTROUTING"
+        
+    if linked_chain is not None:
+        # We suppose that it is linked
+        unlink_chains(table, "ipfloater-%s" % linked_chain, chainname)
+    
+    delete_chain(table, chainname)
+    
+def cleanup_rules():
+    table = iptc.Table(iptc.Table.NAT)
+    table.refresh()
+    table.autocommit = False
+    chains = [ chain.name for chain in table.chains ]
+    chains_rules = [ chainname for chainname in chains if (chainname[:10]=="ipfl-rule-")]
+
+    for chainname in chains_rules:
+        unlink_and_delete_chain(table, chainname)
+    
+    unlink_chains(table, "POSTROUTING", "ipfloater-POSTROUTING")
+    unlink_chains(table, "PREROUTING", "ipfloater-PREROUTING")
+    unlink_chains(table, "OUTPUT", "ipfloater-OUTPUT")
+    delete_chain(table, "ipfloater-POSTROUTING")
+    delete_chain(table, "ipfloater-PREROUTING")
+    delete_chain(table, "ipfloater-OUTPUT")
+    
+    table.commit()
+    table.autocommit = True
+
 def delete_chain(table, chain_name):
     '''
     This function removes the iptables chain with name "chain_name" from the table object addressed by "table".
@@ -42,7 +98,7 @@ def link_chains(table, first_chain, second_chain):
     rule = iptc.Rule()
     rule.target = rule.create_target(second_chain)
     chain = iptc.Chain(table, first_chain)
-    chain.insert_rule(rule)
+    chain.append_rule(rule)
     
 def unlink_chains(table, first_chain, second_chain):
     '''
@@ -73,39 +129,15 @@ def remove_endpointchains(idendpoint):
     table = iptc.Table(iptc.Table.NAT)
     table.refresh()
     table.autocommit = False
-    unlink_chains(table, "OUTPUT", "rule-%s-OUTPUT" % idendpoint)
-    delete_chain(table, "rule-%s-OUTPUT" % idendpoint)
+    unlink_chains(table, "ipfloater-OUTPUT", "ipfl-rule-%s-OUTPUT" % idendpoint)
+    delete_chain(table, "ipfl-rule-%s-OUTPUT" % idendpoint)
 
-    unlink_chains(table, "POSTROUTING", "rule-%s-POSTROUTING" % idendpoint)
-    delete_chain(table, "rule-%s-POSTROUTING" % idendpoint)
+    unlink_chains(table, "ipfloater-POSTROUTING", "ipfl-rule-%s-POSTROUTING" % idendpoint)
+    delete_chain(table, "ipfl-rule-%s-POSTROUTING" % idendpoint)
 
-    unlink_chains(table, "PREROUTING", "rule-%s-PREROUTING" % idendpoint)
-    delete_chain(table, "rule-%s-PREROUTING" % idendpoint)
+    unlink_chains(table, "ipfloater-PREROUTING", "ipfl-rule-%s-PREROUTING" % idendpoint)
+    delete_chain(table, "ipfl-rule-%s-PREROUTING" % idendpoint)
     _LOGGER.debug("removing chain for endpoint %s" % idendpoint)
     table.commit()
     table.autocommit = True
     return True
-
-def find_endpointchains_and_remove():
-    '''
-    This method tries to find rules that seem to have been created by the ipfloater, and deletes them. The rules seem to be created
-      by the floater if they have the form rule-XXX-OUTPUT, rule-XXX-PREROUTING and rule-XXX-POSTROUTING. The ipfloater will only
-      delete the rules if it can find the three rules that would correspond to a endpoint.
-    '''
-    table = iptc.Table(iptc.Table.NAT)
-    table.refresh()
-
-    chains = [ chain.name for chain in table.chains ]
-    chains_output = [ chainname for chainname in chains if (chainname[-7:]=="-OUTPUT") and (chainname[:5]=="rule-")]
-    
-    # Now we are going to check wether the chains refer to a rule created by us or not
-    chains_to_delete = []
-    for chainname in chains_output:
-        idendpoint = chainname[5:-7]
-        if (("rule-%s-PREROUTING" % idendpoint) in chains) and (("rule-%s-POSTROUTING" % idendpoint) in chains):
-            chains_to_delete.append(idendpoint)
-        else:
-            _LOGGER.warning("I found the chain %s that seems to be mine, but I cannot find some of the other chains that I would have created" % chainname)
-            
-    for idendpoint in chains_to_delete:
-        remove_endpointchains(idendpoint)

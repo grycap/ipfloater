@@ -68,7 +68,7 @@ def get_public_redirections(ip, port):
     try:
         port = int(port.strip("/"))
     except:
-        return cpyutils.restutils.error(400, "Malformed request: port is an integer")
+        return cpyutils.restutils.error(400, "Malformed request: port must be an integer")
     
     eps = _ENDPOINT_MANAGER.get_endpoints_from_public(True)
     if (ip in eps) and (port in (eps[ip])):
@@ -139,6 +139,32 @@ def delete_public_redirection(ip_pub, port_pub):
         return cpyutils.restutils.error(404, "Could not delete the redirection %s:%s. Does it exist?" % (ip_pub, port_pub))
     
     return cpyutils.restutils.response_txt("")
+
+@app.route('/public/:ip_pub/:port_pub/:ip_priv/:port_priv', method = 'DELETE')
+def delete_public_redirection_i_p_i_p(ip_pub, port_pub, ip_priv, port_priv):
+    _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+
+    try:
+        port_pub = int(port_pub)
+        port_priv = int(port_priv)
+    except:
+        return cpyutils.restutils.error(400, "Malformed request: port must be an integer")
+
+    ep = _ENDPOINT_MANAGER.get_ep_from_public(ip_pub, port_pub)
+    if (ep is None) or (ep.private_ip != ip_priv) or (ep.private_port != port_priv):
+        return cpyutils.restutils.error(404, "Could not delete the redirection %s -> %s. Does it exist?" % (ip_pub, ip_priv))
+    
+    result, msg = _ENDPOINT_MANAGER.terminate_endpoint(ep)
+    if not result:
+        return cpyutils.restutils.error(501, "Failed to terminate redirection %s -> %s (%s)" % (ip_pub, ip_priv, msg))
+    
+    return cpyutils.restutils.response_txt("")
+
+@app.route('/public/:ip_pub/:ip_priv', method = 'DELETE')
+def delete_public_redirection(ip_pub, ip_priv):
+    return delete_public_redirection_i_p_i_p(ip_pub, 0, ip_priv, 0)
 
 @app.route('/public/:ip_pub', method = 'DELETE')
 def free_public_redirection(ip_pub):
