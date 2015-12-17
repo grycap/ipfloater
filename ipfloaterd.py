@@ -155,6 +155,7 @@ def main_loop():
     eventloop.create_eventloop(True)
     
     ap = CmdLineParser("ipfloater", "This is a server that deals with iptables to enable floating IPs in private networks", [
+        Flag("--block-public", "-b", value = True, default = config.config.BLOCK_PUBLIC_IPS),
         Parameter("--db", "-d", "The path for the persistence file", 1, False, [config.config.DB]),
         Parameter("--listen-ip", "-i", "The ip adress in which ipfloater will listen for xmlrpc requests", 1, False, [ config.config.LISTEN_IP ]),
         Parameter("--listen-port", "-p", "The ip port in which ipfloater will listen for xmlrpc requests", 1, False, [ config.config.LISTEN_PORT ]),
@@ -206,6 +207,10 @@ def main_loop():
     #    iptables.find_endpointchains_and_remove()
     iptables.cleanup_rules()
     iptables.setup_basic_rules()
+    
+    if result.values['--block-public']:
+        for ip in _ENDPOINT_MANAGER.get_public_ips():
+            iptables.block_ip(ip)
         
     _ENDPOINT_MANAGER.get_data_from_db()
     _LOGGER.info("server running in %s:%d" % (SERVER, PORT))

@@ -37,7 +37,8 @@ config = IPFloaterConfig(
         "REST_PORT": 7002,
         "REMOVE_AT_BOOT": True,
         "DB": "sqlite:///var/lib/ipfloater/ipfloater.db",
-        "PRIVATE_IP_RANGES": ""
+        "PRIVATE_IP_RANGES": "",
+        "BLOCK_PUBLIC_IPS": True
     },
     callback = IPFloaterConfig.parse
 )

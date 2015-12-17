@@ -26,9 +26,16 @@ def setup_basic_rules():
     table = iptc.Table(iptc.Table.NAT)
     table.refresh()
     table.autocommit = False
+
+    table_filter = iptc.Table(iptc.Table.FILTER)
+    table_filter.refresh()
+    table_filter.autocommit = False
+
     chain_pos = table.create_chain("ipfloater-POSTROUTING")
     chain_pre = table.create_chain("ipfloater-PREROUTING")
     chain_out = table.create_chain("ipfloater-OUTPUT")
+    
+    chain_input = table_filter.create_chain("ipfloater-INPUT")
     
     # iptables -t nat -A POSTROUTING -m conntrack ! --ctstate DNAT -j ACCEPT
     rule_pos = iptc.Rule()
@@ -40,8 +47,12 @@ def setup_basic_rules():
     link_chains(table, "POSTROUTING", "ipfloater-POSTROUTING")
     link_chains(table, "PREROUTING", "ipfloater-PREROUTING")
     link_chains(table, "OUTPUT", "ipfloater-OUTPUT")
+    link_chains(table_filter, "INPUT", "ipfloater-INPUT")
     table.commit()
     table.autocommit = True
+    
+    table_filter.commit()
+    table_filter.autocommit = True
 
 def unlink_and_delete_chain(table, chainname):
     linked_chain = None
@@ -62,6 +73,11 @@ def cleanup_rules():
     table = iptc.Table(iptc.Table.NAT)
     table.refresh()
     table.autocommit = False
+    
+    table_filter = iptc.Table(iptc.Table.FILTER)
+    table_filter.refresh()
+    table_filter.autocommit = False
+    
     chains = [ chain.name for chain in table.chains ]
     chains_rules = [ chainname for chainname in chains if (chainname[:10]=="ipfl-rule-")]
 
@@ -71,12 +87,33 @@ def cleanup_rules():
     unlink_chains(table, "POSTROUTING", "ipfloater-POSTROUTING")
     unlink_chains(table, "PREROUTING", "ipfloater-PREROUTING")
     unlink_chains(table, "OUTPUT", "ipfloater-OUTPUT")
+    unlink_chains(table_filter, "INPUT", "ipfloater-INPUT")
     delete_chain(table, "ipfloater-POSTROUTING")
     delete_chain(table, "ipfloater-PREROUTING")
     delete_chain(table, "ipfloater-OUTPUT")
+    delete_chain(table_filter, "ipfloater-INPUT")
     
     table.commit()
     table.autocommit = True
+    
+    table_filter.commit()
+    table_filter.autocommit = True
+    
+def block_ip(public_ip):
+    table_filter = iptc.Table(iptc.Table.FILTER)
+    table_filter.refresh()
+    table_filter.autocommit = False
+
+    rule_drop = iptc.Rule()
+    rule_drop.create_target("DROP")
+    rule_drop.dst = "%s/32" % public_ip
+    
+    chain_input = iptc.Chain(table_filter, "ipfloater-INPUT")
+    chain_input.append_rule(rule_drop)
+
+    table_filter.commit()
+    table_filter.autocommit = True
+    
 
 def delete_chain(table, chain_name):
     '''
