@@ -23,7 +23,7 @@ from version import VERSION
 # How to install:
 # $ apt-get update
 # $ apt-get install python python-pip iptables git
-# $ pip install --upgrade python-iptables cpyutils
+# $ pip install --upgrade python-iptables cpyutils bottle cherrypy 
 # $ git clone https://github.com/dealfonso/ipfloater
 # $ python setup.py install --record installed-files.txt
 
@@ -41,5 +41,5 @@ setup(name='ipfloater',
       packages = [ 'ipfloater' ],
       package_dir = { 'ipfloater' : '.'},
       download_url = 'https://github.com/dealfonso/ipfloater',
-      install_requires = [ 'cpyutils >= 0.14' ]
+      install_requires = [ 'cpyutils >= 0.14', 'python-iptables', 'bottle', 'cherrypy' ]
 )
