@@ -140,7 +140,7 @@ def delete_public_redirection(ip_pub, port_pub):
     
     return cpyutils.restutils.response_txt("")
 
-@app.route('/public/:ip_pub/:port_pub/:ip_priv/:port_priv', method = 'DELETE')
+@app.route('/public/:ip_pub/:port_pub/redirect/:ip_priv/:port_priv', method = 'DELETE')
 def delete_public_redirection_i_p_i_p(ip_pub, port_pub, ip_priv, port_priv):
     _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
     if _ENDPOINT_MANAGER is None:
@@ -162,7 +162,7 @@ def delete_public_redirection_i_p_i_p(ip_pub, port_pub, ip_priv, port_priv):
     
     return cpyutils.restutils.response_txt("")
 
-@app.route('/public/:ip_pub/:ip_priv', method = 'DELETE')
+@app.route('/public/:ip_pub/redirect/:ip_priv', method = 'DELETE')
 def delete_public_redirection(ip_pub, ip_priv):
     return delete_public_redirection_i_p_i_p(ip_pub, 0, ip_priv, 0)
 
