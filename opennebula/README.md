@@ -26,6 +26,9 @@ Then you should get a pool of publicly addressable IPs, along with their MAC add
 
 And now you have to prepare the IPFloater and ONE:
 
+### Known issues
+First of all it is important to state that there is a problem (it will be solved soon), because when the VM is deleted or shutdown, the attached nics are not detached from the VM. So it is needed some extra code when finalising a VM. Also it is needed to check what happens when saving, migrating and powering off VMs.
+
 ### Preparing IPFloater.
 You need to assign the public IPs to the IPFloater. You can make this by creating a file like this and use it ```IP_POOL_FILE``` in the configuration of IPFloater:
 
@@ -60,6 +63,7 @@ You should find these lines:
 ```
 
 ### Preparing ONE
+
 Now you have to create the network that contains the pairs IP-MAC address in ONE. Let's call it ```floating-ips```.
 
 ```bash
