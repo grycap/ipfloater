@@ -82,7 +82,7 @@ For the case of file ```/var/lib/one/remotes/vmm/kvm/attach_nic```, you just nee
 This piece of code will check whether an IP that is assigned in the runtime is a floating IP or not. If it is not a floating IP, it will continue working as usual, but if it is a floating IP, this piece of code
 will make the magic.
 
-```
+```bash
 #-------- code snip to attach floating IPs --------------------------
 IPFLOATER_HOST_REST=onecloud
 IPFLOATER_PORT_REST=7003
@@ -110,6 +110,8 @@ fi
 ```
 
 For the case of file ```/var/lib/one/remotes/vmm/kvm/detach_nic```, you just need to paste the following piece of code just after the line ```MAC=$2```.
+
+```bash
 #-------- code snip to attach floating IPs --------------------------
 IPFLOATER_HOST_REST=onecloud
 IPFLOATER_PORT_REST=7003
@@ -134,5 +136,6 @@ if [ $? -eq 0 ] && [ "$FLOATING_IP" != "" ]; then
         fi
 fi
 # -------------------------------------------------------------------
+```
 
 In both cases you must adjust the names of your gateway and ONE front-end, by using the variables IPFLOATER_HOST_REST, IPFLOATER_PORT_REST and ONE_FRONTEND
