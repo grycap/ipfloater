@@ -128,18 +128,6 @@ def create_public_redirection_i_i(ip_priv, port_priv):
     # PUT {ip, port} (redirects to "ip_priv:port_priv", the ipfloater will look for an IP and a port)
     return create_public_redirection(None, None, ip_priv, port_priv)
 
-@app.route('/public/:ip_pub/:port_pub', method = 'DELETE')
-def delete_public_redirection(ip_pub, port_pub):
-    _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
-    if _ENDPOINT_MANAGER is None:
-        return cpyutils.restutils.error(500, "Endpoint Manager not found")
-
-    result = _ENDPOINT_MANAGER.terminate_endpoint_from(ip_pub, port_pub)
-    if not result:
-        return cpyutils.restutils.error(404, "Could not delete the redirection %s:%s. Does it exist?" % (ip_pub, port_pub))
-    
-    return cpyutils.restutils.response_txt("")
-
 @app.route('/public/:ip_pub/:port_pub/redirect/:ip_priv/:port_priv', method = 'DELETE')
 def delete_public_redirection_i_p_i_p(ip_pub, port_pub, ip_priv, port_priv):
     _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
@@ -163,21 +151,37 @@ def delete_public_redirection_i_p_i_p(ip_pub, port_pub, ip_priv, port_priv):
     return cpyutils.restutils.response_txt("")
 
 @app.route('/public/:ip_pub/redirect/:ip_priv', method = 'DELETE')
-def delete_public_redirection(ip_pub, ip_priv):
+def delete_public_redirection_i_i(ip_pub, ip_priv):
     return delete_public_redirection_i_p_i_p(ip_pub, 0, ip_priv, 0)
 
 @app.route('/public/:ip_pub', method = 'DELETE')
-def free_public_redirection(ip_pub):
+def delete_public_redirection_i(ip_pub):
     _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
     if _ENDPOINT_MANAGER is None:
         return cpyutils.restutils.error(500, "Endpoint Manager not found")
 
-    if not _ENDPOINT_MANAGER.clean_public_ip(ip_pub):
-        return cpyutils.restutils.error(404, "Could not clean the redirections from %s. Do they exist?" % (public_ip))
+    eps = _ENDPOINT_MANAGER.get_endpoints_from_public(False)
+    if not ip_pub in eps:
+        return cpyutils.restutils.error(404, "Could not clean the redirections from %s. Do they exist?" % (ip_pub))
+
+    for port_pub, ep in eps[ip_pub].items():
+        delete_public_redirection_i_p_i_p(ip_pub, port_pub, ep.private_ip, ep.private_port)
     
     return cpyutils.restutils.response_txt("")
 
-@app.route('/private/')
+@app.route('/public/:ip_pub/:port_pub', method = 'DELETE')
+def delete_public_redirection_i_p(ip_pub, port_pub):
+    _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+
+    ep = _ENDPOINT_MANAGER.get_ep_from_public(ip_pub, port_pub)
+    if ep is not None:
+        return cpyutils.restutils.error(404, "Could not clean the redirection from %s:%s. Does it exist?" % (ip_pub, port_pub))
+
+    return delete_public_redirection_i_p_i_p(ip_pub, port_pub, ep.private_ip, ep.private_port)
+
+@app.route('/private')
 def get_private_redirections():
     _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
     if _ENDPOINT_MANAGER is None:
@@ -195,19 +199,54 @@ def get_private_redirections(ip):
     else:
         return cpyutils.restutils.error(404, "IP %s not found" % ip)
 
-@app.route('/private/:ip/:port')
-def get_public_redirections(ip, port):
+@app.route('/private/:ip_priv', method = "DELETE")
+def delete_private_redirections(ip_priv):
+    _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    
+    eps = _ENDPOINT_MANAGER.get_endpoints_from_private(False)
+    if ip_priv in eps:
+        for port_priv, ep in eps[ip_priv].items():
+            delete_private_redirection(ip_priv, port_priv)
+        
+        return cpyutils.restutils.response_txt("")
+    else:
+        return cpyutils.restutils.error(404, "IP %s not found" % ip)
+
+@app.route('/private/:ip_priv/:port_priv')
+def get_public_redirections(ip_priv, port_priv):
     _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
     if _ENDPOINT_MANAGER is None:
         return cpyutils.restutils.error(500, "Endpoint Manager not found")
     
     try:
-        port = int(port.strip("/"))
+        port_priv = int(port_priv.strip("/"))
     except:
         return cpyutils.restutils.error(400, "Malformed request: port is an integer")
     
     eps = _ENDPOINT_MANAGER.get_endpoints_from_private(True)
-    if (ip in eps) and (port in (eps[ip])):
-        return cpyutils.restutils.response_json((eps[ip])[port])
+    if (ip_priv in eps) and (port_priv in (eps[ip_priv])):
+        return cpyutils.restutils.response_json((eps[ip_priv])[port_priv])
     else:
         return cpyutils.restutils.error(404, "redirection not found")
+
+@app.route('/private/:ip_priv/:port_priv', method = "DELETE")
+def delete_private_redirection(ip_priv, port_priv):
+    _ENDPOINT_MANAGER = ipfloaterd.get_endpoint_manager()
+    if _ENDPOINT_MANAGER is None:
+        return cpyutils.restutils.error(500, "Endpoint Manager not found")
+    try:
+        port_priv = int(port_priv)
+    except:
+        return cpyutils.restutils.error(400, "Malformed request: port is an integer")
+    
+    ep = _ENDPOINT_MANAGER.get_ep_from_private(ip_priv, port_priv)
+    if ep is None:
+        return cpyutils.restutils.error(404, "Redirection to %s:%s not found" % (ip_priv, port_priv))
+    
+    result, msg = _ENDPOINT_MANAGER.terminate_endpoint(ep)
+    if not result:
+        return cpyutils.restutils.error(501, "Failed to terminate redirection to %s:%s (%s)" % (ip_priv, port_priv, msg))
+    
+    return cpyutils.restutils.response_txt("")
