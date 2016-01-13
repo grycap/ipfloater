@@ -1,5 +1,3 @@
-# coding: utf-8
-#
 # Floating IP Addresses manager (IPFloater)
 # Copyright (C) 2015 - GRyCAP - Universitat Politecnica de Valencia
 # 
@@ -15,9 +13,17 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-# 
-VERSION="0.12"
-
-def get():
-    global VERSION
-    return VERSION
+--- detach_nic	2015-12-16 16:04:59.210550026 +0100
++++ detach_nic.ipfloater	2016-01-13 13:40:49.155182296 +0100
+@@ -22,6 +22,11 @@
+ DOMAIN=$1
+ MAC=$2
+ 
++#-------- code snip to detach floating IPs --------------------------
++source $(dirname $0)/ipfloater
++attach_ip "$DOMAIN" "$MAC"
++# -------------------------------------------------------------------
++
+ DETACH_ARGS="--domain $DOMAIN --type bridge --mac $MAC"
+ 
+ exec_and_log "virsh --connect $LIBVIRT_URI detach-interface $DETACH_ARGS" \

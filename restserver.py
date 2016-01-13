@@ -164,6 +164,9 @@ def delete_public_redirection_i(ip_pub):
     if not ip_pub in eps:
         return cpyutils.restutils.error(404, "Could not clean the redirections from %s. Do they exist?" % (ip_pub))
 
+    if len(eps[ip_pub]) == 0:
+        return cpyutils.restutils.error(404, "Could not clean the redirections from %s. Do they exist?" % (ip_pub))
+    
     for port_pub, ep in eps[ip_pub].items():
         delete_public_redirection_i_p_i_p(ip_pub, port_pub, ep.private_ip, ep.private_port)
     
@@ -176,7 +179,7 @@ def delete_public_redirection_i_p(ip_pub, port_pub):
         return cpyutils.restutils.error(500, "Endpoint Manager not found")
 
     ep = _ENDPOINT_MANAGER.get_ep_from_public(ip_pub, port_pub)
-    if ep is not None:
+    if ep is None:
         return cpyutils.restutils.error(404, "Could not clean the redirection from %s:%s. Does it exist?" % (ip_pub, port_pub))
 
     return delete_public_redirection_i_p_i_p(ip_pub, port_pub, ep.private_ip, ep.private_port)

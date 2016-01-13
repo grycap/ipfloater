@@ -26,9 +26,6 @@ Then you should get a pool of publicly addressable IPs, along with their MAC add
 
 And now you have to prepare the IPFloater and ONE:
 
-### Known issues
-First of all it is important to state that there is a problem (it will be solved soon), because when the VM is deleted or shutdown, the attached nics are not detached from the VM. So it is needed some extra code when finalising a VM. Also it is needed to check what happens when saving, migrating and powering off VMs.
-
 ### Preparing IPFloater.
 You need to assign the public IPs to the IPFloater. You can make this by creating a file like this and use it ```IP_POOL_FILE``` in the configuration of IPFloater:
 
@@ -79,8 +76,16 @@ onevnet create floating-ips.net
 If you want to be able to use it as a common network (being able of use it by assigning it to a VM), you should probably pay attention to the parameter ```BRIDGE``` and also include other parameters.
 
 ### Preparing the ONE VMM
-This is the last step, and you need to add a piece of code to your favourite VMM. If you are using KVM with ONE, you need to update the files ```/var/lib/one/remotes/vmm/kvm/attach_nic``` and ```/var/lib/one/remotes/vmm/kvm/detach_nic```.
+This is the last step, and you need to copy the file ```opennebula/ipfloater``` to the folder which contains the files for your VMM (i.e. ```/var/lib/one/remotes/vmm/kvm```) and add a piece of code to some files. If you are using KVM with ONE, you need to update the files ```/var/lib/one/remotes/vmm/kvm/attach_nic```, ```/var/lib/one/remotes/vmm/kvm/detach_nic```, ```/var/lib/one/remotes/vmm/kvm/shutdown``` and ```/var/lib/one/remotes/vmm/kvm/cancel```.
 
+You can find a set of patch files that can be used to patch the files of OpenNebula 4.12.1 in folder ```opennebula/``` from the source code distribution of ```ipfloater```: ```attach_nic.patch```, ```cancel.patch```, ```detach_nic.patch``` and ```shutdown.patch```. All these files can be used with command ```patch```. An example is:
+
+```bash
+patch -p1 /var/lib/one/remotes/vmm/kvm/attach_nic < attach_nic.patch
+patch -p1 /var/lib/one/remotes/vmm/kvm/detach_nic < detach_nic.patch
+patch -p1 /var/lib/one/remotes/vmm/kvm/cancel < cancel.patch
+patch -p1 /var/lib/one/remotes/vmm/kvm/shutdown < shutdown.patch
+```
 
 For the case of file ```/var/lib/one/remotes/vmm/kvm/attach_nic```, you just need to paste this piece of code just after the line ```NET_DRV=$5```.
 This piece of code will check whether an IP that is assigned in the runtime is a floating IP or not. If it is not a floating IP, it will continue working as usual, but if it is a floating IP, this piece of code
@@ -88,28 +93,8 @@ will make the magic.
 
 ```bash
 #-------- code snip to attach floating IPs --------------------------
-IPFLOATER_HOST_REST=onecloud
-IPFLOATER_PORT_REST=7003
-ONE_FRONTEND=onecloud
-#-------- end of configuration --------------------------------------
-IPFLOATER_REST_SERVER=$IPFLOATER_HOST_REST:$IPFLOATER_PORT_REST
-VMID=${DOMAIN:4}
-FLOATING_IP=$(curl -fXGET http://$IPFLOATER_REST_SERVER/arp/$MAC)
-if [ $? -eq 0 ] && [ "$FLOATING_IP" != "" ]; then
-        IP=$(ssh $ONE_FRONTEND "onevm show $VMID -x | /var/lib/one/remotes/datastore/xpath.rb /VM/TEMPLATE/NIC[NIC_ID=0]/IP | head -n 1")
-        if [ "$IP" != "" ]; then
-                RESULT=$(curl -fXPUT http://$IPFLOATER_REST_SERVER/public/$FLOATING_IP/redirect/$IP)
-                if [ $? -ne 0 ]; then
-                        log_error "could not attach floating IP $FLOATING_IP to $IP ($RESULT)"
-                        exit 1
-                fi
-                log_info "IP $FLOATING_IP successfully attached to ip $IP"
-                exit 0
-        else
-                log_error "requesting a floating IP but could not get the main IP of vm $DOMAIN"
-                exit 1
-        fi
-fi
+source $(dirname $0)/ipfloater
+attach_ip "$DOMAIN" "$MAC"
 # -------------------------------------------------------------------
 ```
 
@@ -117,29 +102,19 @@ For the case of file ```/var/lib/one/remotes/vmm/kvm/detach_nic```, you just nee
 
 ```bash
 #-------- code snip to attach floating IPs --------------------------
-IPFLOATER_HOST_REST=onecloud
-IPFLOATER_PORT_REST=7003
-ONE_FRONTEND=onecloud
-#-------- end of configuration --------------------------------------
-IPFLOATER_REST_SERVER=$IPFLOATER_HOST_REST:$IPFLOATER_PORT_REST
-VMID=${DOMAIN:4}
-FLOATING_IP=$(curl -fXGET http://$IPFLOATER_REST_SERVER/arp/$MAC)
-if [ $? -eq 0 ] && [ "$FLOATING_IP" != "" ]; then
-        IP=$(ssh $ONE_FRONTEND "onevm show $VMID -x | /var/lib/one/remotes/datastore/xpath.rb /VM/TEMPLATE/NIC[NIC_ID=0]/IP | head -n 1")
-        if [ "$IP" != "" ]; then
-                RESULT=$(curl -fXDELETE http://$IPFLOATER_REST_SERVER/public/$FLOATING_IP/redirect/$IP)
-                if [ $? -ne 0 ]; then
-                        log_error "could not detach floating IP $FLOATING_IP to $IP ($RESULT)"
-                        exit 1
-                fi
-                log_info "IP $FLOATING_IP successfully detached from ip $IP"
-                exit 0
-        else
-                log_error "detaching a floating IP but could not get the main IP of vm $DOMAIN"
-                exit 1
-        fi
-fi
+source $(dirname $0)/ipfloater
+detach_ip "$DOMAIN" "$MAC"
 # -------------------------------------------------------------------
 ```
 
-In both cases you must adjust the names of your gateway and ONE front-end, by using the variables IPFLOATER_HOST_REST, IPFLOATER_PORT_REST and ONE_FRONTEND
+Finally you MUST adjust the name of your gateway and ONE front-end, by using the variables IPFLOATER_HOST_REST, IPFLOATER_PORT_REST and ONE_FRONTEND in file ipfloater.
+
+### ATTENTION: Distribute the files
+
+Please make sure that the files that you modify in the VMM are distributed into the internal nodes. You can verify it by checking the contents of the corresponding ```/var/tmp/one/vmm``` folders in the internal nodes.
+
+### Notes on IPFloater and ONE
+
+As ONE keeps track of the IP leases, you can use an existing network in ONE. Then you will be able to get IPs from that ONE network either by using it for the VMs (i.e. getting the IP by using DHCP, cloud-init or statically configured addresses), or by using them in a floating-ip scheme by attaching them to the VMs.
+
+We have also verified that it can be used in conjunction with rOCCI, just as it is done in OpenStack. That's cool ;)

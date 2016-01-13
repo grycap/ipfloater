@@ -1,0 +1,114 @@
+#!/bin/bash
+# coding: utf-8
+#
+# Floating IP Addresses manager (IPFloater)
+# Copyright (C) 2015 - GRyCAP - Universitat Politecnica de Valencia
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# 
+
+# --------------------------------------
+# Configuration
+# --------------------------------------
+# This file will be used by the internal nodes from the virtualization platform. So you MUST double check that the names of the hosts can be used from the internal nodes.
+
+# The internal name for the host in which ipfloater is installed (the ipfloater node)
+IPFLOATER_HOST_REST=niebla01
+# The port in which the REST api of the ipfloater is listening
+IPFLOATER_PORT_REST=7003
+# You can check these parameters by issuing this command:
+# $ curl -XGET http://niebla01:7003/public
+
+# The internal name of the OpenNebula front-end. It is needed to configure a passwordless ssh access to the ONE_FRONTEND from the internal nodes, for oneadmin
+ONE_FRONTEND=onecloud
+# You can check this parameter by issuing the command
+# $ ssh oneadmin@onecloud hostname
+
+# ---- do not touch from here on ----
+IPFLOATER_REST_SERVER=$IPFLOATER_HOST_REST:$IPFLOATER_PORT_REST
+
+function attach_ip() {
+        DOMAIN=$1
+        MAC=$2
+
+        VMID=${DOMAIN:4}
+        FLOATING_IP=$(curl -fXGET http://$IPFLOATER_REST_SERVER/arp/$MAC)
+        if [ $? -eq 0 ] && [ "$FLOATING_IP" != "" ]; then
+                IP=$(ssh $ONE_FRONTEND "onevm show $VMID -x | /var/lib/one/remotes/datastore/xpath.rb /VM/TEMPLATE/NIC[NIC_ID=0]/IP | head -n 1")
+                if [ "$IP" != "" ]; then
+                        RESULT=$(curl -fXPUT http://$IPFLOATER_REST_SERVER/public/$FLOATING_IP/redirect/$IP)
+                        if [ $? -ne 0 ]; then
+                                log_error "could not attach floating IP $FLOATING_IP to $IP ($RESULT)"
+                                exit 1
+                        fi
+                        log_info "IP $FLOATING_IP successfully attached to ip $IP"
+                        exit 0
+                else
+                        log_error "requesting a floating IP but could not get the main IP of vm $DOMAIN"
+                        exit 1
+                fi
+        fi
+}
+
+function detach_ip() {
+        DOMAIN=$1
+        MAC=$2
+
+        VMID=${DOMAIN:4}
+        FLOATING_IP=$(curl -fXGET http://$IPFLOATER_REST_SERVER/arp/$MAC)
+        if [ $? -eq 0 ] && [ "$FLOATING_IP" != "" ]; then
+                IP=$(ssh $ONE_FRONTEND "onevm show $VMID -x | /var/lib/one/remotes/datastore/xpath.rb /VM/TEMPLATE/NIC[NIC_ID=0]/IP | head -n 1")
+                if [ "$IP" != "" ]; then
+                        RESULT=$(curl -fXDELETE http://$IPFLOATER_REST_SERVER/public/$FLOATING_IP/redirect/$IP)
+                        if [ $? -ne 0 ]; then
+                                log_error "could not detach floating IP $FLOATING_IP to $IP ($RESULT)"
+                                exit 1
+                        fi
+                        log_info "IP $FLOATING_IP successfully detached from ip $IP"
+                        exit 0
+                else
+                        log_error "detaching a floating IP but could not get the main IP of vm $DOMAIN"
+                        exit 1
+                fi
+        fi
+}
+
+function detach_ips() {
+        DOMAIN=$1
+        VMID=${DOMAIN:4}
+
+        IPLIST=$(ssh $ONE_FRONTEND bash -s <<EOF1010
+XMLINFO=\$(onevm show -x $VMID)
+NIC_ID=0
+NIC_FAIL=0
+while [ \$NIC_FAIL -eq 0 ]; do
+IP=\$(echo "\$XMLINFO" | /var/lib/one/remotes/datastore/xpath.rb /VM/TEMPLATE/NIC[NIC_ID=\$NIC_ID]/IP | head -n 1)
+if [ "\$IP" == "" ]; then
+NIC_FAIL=1
+else
+echo \$IP
+NIC_ID=\$[ \$NIC_ID + 1 ]
+fi
+done
+EOF1010
+)
+
+        # We try to detach any IP in this VM
+        for ip in $IPLIST; do
+                RESULT=$(curl -fXDELETE http://$IPFLOATER_REST_SERVER/public/$ip)
+                if [ $? -eq 0 ]; then
+                        log_info "IP $ip successfully dettached"
+                fi
+        done
+}
