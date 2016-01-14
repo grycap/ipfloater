@@ -117,4 +117,17 @@ Please make sure that the files that you modify in the VMM are distributed into 
 
 As ONE keeps track of the IP leases, you can use an existing network in ONE. Then you will be able to get IPs from that ONE network either by using it for the VMs (i.e. getting the IP by using DHCP, cloud-init or statically configured addresses), or by using them in a floating-ip scheme by attaching them to the VMs.
 
-We have also verified that it can be used in conjunction with rOCCI, just as it is done in OpenStack. That's cool ;)
+### Using rOCCI server for ONE with floating IPs
+You can enable floating IPs via rOCCI, using [rOCCI-server](https://github.com/EGI-FCTF/rOCCI-server). A common workflow is to create one VM and attaching a OCCI link to the VM, as it happens in the [EGI Federated Cloud aka FedCloud](http://www.egi.eu/infrastructure/cloud/). In order to use the rOCCI server, you just need to enable the floating IPs in ONE (as described above) and then adjust the file ```/etc/occi-server/backends/opennebula/templates/compute_nic.erb```
+
+For the specific case of FedCloud, to get a public IP you should attach a compute to the ```/network/public``` network. Using the default installation, you cannot make it because of the template expects a network ID instead of a network name.
+
+You can change it by modifying the file ```compute_nic.erb``` as follows:
+
+```bash
+NIC = [
+  NETWORK = "<%= @networkinterface.target.split('/').last %>"
+  ,NETWORK_UNAME = "oneadmin"
+```
+
+In FedCloud we have verified that it can be used in conjunction with rOCCI, just as it is done in OpenStack.
