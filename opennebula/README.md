@@ -20,6 +20,26 @@ for the interface, or using the console issuing weird commands such as ```ifconf
 
 Using this mechanism, if you attach a nic that is part of a floating ip pool, you will automatically have access to the VM via the publicly addressable IP that has been assigned to the VM by ONE.
 
+## Use case and workflow for the user
+Imagine that you own a deploymen in which you only have 5 publicly addressable IPs available, but you can run dozens of VMs.
+
+Suppose that you are creating a virtual infrastructure built from: 
+- 1 database server
+- 2 web servers
+- 1 web balancer
+
+In that infrastructure, you only need 1 public addressable IP, for the web balancer. So you can create all the servers with IPs that are in a private range, and use a floating IP for the web balancer. While configuring, you'll be able to change the floating IP from one to another server.
+
+It could be done using an statically assigned public IP for the web balancer in the template. But you should imagine this scenario in a infrastructure offered to external users, in which they are not allowed to change the templates (i.e. as it is made in AWS or OpenStack deployments). All your VMs will be delivered an internal IP, and the user will be able to request a floating IP, just in case that he needs it.
+
+### Workflow
+1. All the VMs in the deployment are created based on VM templates that are not allowed to be modified. There are two networks available: ```private``` that is a private network in the range 192.168.x.x and ```public``` that has 5 publicly addressable IPs. The templates make that the VM obtain private IPs.
+2. The user creates all his VMs and the templates grant private IPs for VM 1, VM 2, etc.
+3. The user requests a public IP for VM 1: using the ```attach_nic``` utility on VM 1 to get an IP from ```public``` network.
+4. The user needs to change the public IP from VM 1 to VM 2: he uses the ```detach_nic``` utility for VM 1 and uses the ```attach_nic``` utility on VM 2 to get an IP from ```public``` network.
+
+The result is that **only 1 public IP** has been used.
+
 ## How can it be done in ONE?
 First of all, you can install ipfloater in the host that is routing the private IPs to privide internet access to the VMs (i.e. the gateway of the private network).
 Then you should get a pool of publicly addressable IPs, along with their MAC addresses (if they are not statically assigned, you can invent them with the proper form: e.g. 60:60:00:00:00:01).
