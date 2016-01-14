@@ -46,14 +46,21 @@ def main_function():
                 return False, "Could not contact the server"
 
         def getip(self, parse_result, error):
-            result, ep = self._XMLRPC_SERVER.query_endpoint(parse_result.values['ip'][0], 0)
+            result, ep = self._XMLRPC_SERVER.create_public_redirection("", -1, parse_result.values['private ip'][0], 0)
+            if result:
+                return True, "Public IP obtained: %s" % str(ep)
+            else:
+                return False, "Could not obtain a redirection (server responded: %s)" % ep
+
+        def redirect(self, parse_result, error):
+            result, ep = self._XMLRPC_SERVER.create_public_redirection(parse_result.values['public ip'][0], 0, parse_result.values['private ip'][0], 0)
             if result:
                 return True, "Public IP obtained: %s" % str(ep)
             else:
                 return False, "Could not obtain a redirection (server responded: %s)" % ep
         
         def releaseip(self, parse_result, error):
-            ip = parse_result.values['ip'][0]
+            ip = parse_result.values['public ip'][0]
             result, ep = self._XMLRPC_SERVER.clean_public_ip(ip)
             if result:
                 return True, "Released the redirection from IP %s" % (ip)
@@ -79,15 +86,19 @@ def main_function():
                 return True, "%s" % (ip)
             else:
                 return False, "Failed to get the ip address for %s (server responded: %s)" % (mac, ip)
-    
+            
     ap = IPFloaterCmdLine("ipfloater", "This the client for ipfloaterd, which is a server that deals with iptables to enable floating IPs in private networks", [
         Parameter("--server-ip", "-i", "The ip adress in which ipfloater listens", 1, False, ["127.0.0.1"]),
         Parameter("--server-port", "-p", "The ip port in which ipfloater listens", 1, False, [7000]),
             Operation("getip", desc = "Requests a floating IP for a private IP", arguments = [
-                Argument("ip", "private ip address to which is requested the floating ip", mandatory = True, count = 1),
+                Argument("private ip", "private ip address to which is requested the floating ip", mandatory = True, count = 1),
+            ]),
+            Operation("redirect", desc = "Redirects a floating IP to a private IP", arguments = [
+                Argument("public ip", "floating ip address", mandatory = True, count = 1),
+                Argument("private ip", "private ip address to which is requested the floating ip", mandatory = True, count = 1),
             ]),
             Operation("releaseip", desc = "Releases a floating IP", arguments = [
-                Argument("ip", "public ip address (the floating ip)", mandatory = True, count = 1),
+                Argument("public ip", "public ip address (the floating ip)", mandatory = True, count = 1),
             ]),
             Operation("status", desc = "Gets the status of the redirections"),
             Operation("version", desc = "Gets the version of the client and the server"),
@@ -96,7 +107,7 @@ def main_function():
                 Argument("mac", "the mac address for which is requested the ip", mandatory = True, count = 1),
             ]),
     ])
-
+    
     ap.self_service(True)
     
 if __name__ == '__main__':

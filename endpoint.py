@@ -41,6 +41,13 @@ class Endpoint(object):
                 'private_port': self.private_port,
                 'timestamp': self.timestamp}
 
+    def __str__(self):
+        if self.public_port == 0:
+            return "%s -> %s" % (self.public_ip, self.private_ip)
+        else:
+            return "%s:%s -> %s:%s" % (self.public_ip, self.public_port, self.private_ip, self.private_port)
+        return str(self.to_json())
+
     def __init__(self, public_ip, public_port, private_ip, private_port):
         self.id = Endpoint.get_id()
         self.public_ip = public_ip
@@ -448,6 +455,9 @@ class EndpointManager():
         @return values: possible endpoint list, reason (if the list is empty)
         '''
         # _LOGGER.log("%s:%s -> %s:%s" % (public_ip, public_port, private_ip, private_port))
+        if cpyutils.iputils.check_ip(private_ip) is None:
+            return [], _LOGGER.log("bad private IP format (%s)" % private_ip, logging.ERROR)
+            
         if not self._ip_in_ranges(private_ip):
             return [], _LOGGER.log("tried to redirect to an ip that is not in any of the private ranges", logging.ERROR)
 

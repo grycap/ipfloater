@@ -54,23 +54,30 @@ def get_arp_table():
 _ENDPOINT_MANAGER = None
 _ARP_TABLE = None
 
-def query_endpoint(dst_ip, dst_port, register = True):
+def create_public_redirection(ip_pub, port_pub, ip_priv, port_priv):
     '''
+    This method requests a whole specific public IP to be redirected to a private IP
     '''
+    if ip_pub == "": ip_pub = None
+    if port_pub < 0: port_pub = None
+    if ip_priv == "": ip_priv = None
+    if port_priv < 0: port_priv = None
+    
     if _ENDPOINT_MANAGER is None:
         return False, "Endpoint Manager not found"
     
-    ep, info = _ENDPOINT_MANAGER.request_endpoint(None, None, dst_ip, dst_port)
-    if len(ep) == 0:
-        return False, "Could not obtain a redirection for %s:%d (%s)" % (dst_ip, dst_port, info)
+    ep_list, info = _ENDPOINT_MANAGER.request_endpoint(ip_pub, port_pub, ip_priv, port_priv)
+    if len(ep_list) == 0:
+        return False, "Could not obtain a redirection for %s:%d (%s)" % (ip_priv, port_priv, info)
     
-    if register:
-        ep = ep[0]
+    if len(ep_list) > 0:
+        ep = ep_list[0]
         result, msg = _ENDPOINT_MANAGER.apply_endpoint(ep)
         if not result:
             return False, "Could not apply the redirection %s (%s)" % (ep, msg)
-
-    return True, ep
+        return True, str(ep)
+    else:
+        return False, "Could not find any free IP"
 
 def unregister_redirection_to(dst_ip, dst_port):
     if _ENDPOINT_MANAGER is None:
@@ -199,7 +206,7 @@ def main_loop():
     for ipmask in config.config.PRIVATE_IP_RANGES:
         _ENDPOINT_MANAGER.add_private_range(ipmask)
     
-    if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [arp, query_endpoint, unregister_redirection, unregister_redirection_from, unregister_redirection_to, clean_private_ip, clean_public_ip, get_version, get_redirections, get_public_ips]):
+    if not xmlrpcutils.create_xmlrpc_server_in_thread(SERVER, PORT, [arp, create_public_redirection, unregister_redirection, unregister_redirection_from, unregister_redirection_to, clean_private_ip, clean_public_ip, get_version, get_redirections, get_public_ips]):
         _LOGGER.error("could not setup the service")
         raise Exception("could not setup the service")
 
