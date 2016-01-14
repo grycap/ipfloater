@@ -21,6 +21,9 @@ But such Floating IPs are not available for a general case or other platforms su
 ## How?
 IP Floater is based in iptables and implements pretty much the same rules that are implemented by the OpenStack's Floating IP, to make that the router host redirect the traffic directed to a public IP to a private IP in the LAN.
 
+## Where?
+Appart from using the ipfloater by itself, you can try the [integration with OpenNebula](opennebula/README.md), that enables to deploy any VM using a private range of IPs. Then it is possible to attach floating IPs to them, in order to be able to access to them from the outern internet. Instead of using the concept of attaching IPs in ONE (i.e. creating an extra network device), the implementation manages the floating IPs concept from OpenStack and Amazon AWS by mapping public IPs to the private IPs.
+
 # Install
 
 ## Requirements
