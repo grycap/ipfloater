@@ -75,18 +75,23 @@ IPFloater has a command line application whose help is self-contained
 ```
 This the client for ipfloaterd, which is a server that deals with iptables to enable floating IPs in private networks
 
-Usage: ipfloater [-h] [--server-ip <value>] [--server-port <value>] [getip|releaseip|status|version|ippool]
+Usage: ipfloater [-h] [--server-ip <value>] [--server-port <value>] [getip|redirect|releaseip|status|version|ippool|arp]
 
 	[-h|--help] - Shows this help
 	[--server-ip|-i] <value> - The ip adress in which ipfloater listens
 	[--server-port|-p] <value> - The ip port in which ipfloater listens
 	* Requests a floating IP for a private IP
-	  Usage: getip <ip>
-		<ip> - private ip address to which is requested the floating ip
+	  Usage: getip <private ip>
+		<private ip> - private ip address to which is requested the floating ip
 
-	* Releases the floating IP to a private IP
-	  Usage: releaseip <ip>
-		<ip> - private ip address to which is granted the floating ip
+	* Redirects a floating IP to a private IP
+	  Usage: redirect <public ip> <private ip>
+		<public ip> - floating ip address
+		<private ip> - private ip address to which is requested the floating ip
+
+	* Releases a floating IP
+	  Usage: releaseip <public ip>
+		<public ip> - public ip address (the floating ip)
 
 	* Gets the status of the redirections
 	  Usage: status 
@@ -96,4 +101,8 @@ Usage: ipfloater [-h] [--server-ip <value>] [--server-port <value>] [getip|relea
 
 	* Gets the public ip addresses in the pool
 	  Usage: ippool 
+
+	* Requests the IP for a MAC address
+	  Usage: arp <mac>
+		<mac> - the mac address for which is requested the ip
 ```
