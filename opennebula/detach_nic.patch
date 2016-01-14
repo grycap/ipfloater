@@ -21,7 +21,7 @@
  
 +#-------- code snip to detach floating IPs --------------------------
 +source $(dirname $0)/ipfloater
-+attach_ip "$DOMAIN" "$MAC"
++detach_ip "$DOMAIN" "$MAC"
 +# -------------------------------------------------------------------
 +
  DETACH_ARGS="--domain $DOMAIN --type bridge --mac $MAC"
