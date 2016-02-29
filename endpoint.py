@@ -80,7 +80,7 @@ class Endpoint(object):
         rule_return = iptc.Rule()
         rule_return.target = iptc.Target(rule_return, "RETURN")
 
-        if True:
+        try:
             # OUTPUT Rules
             if (iptables.chain_exists(table, "ipfl-rule-%s-OUTPUT" % self.id)):
                 if OVERWRITE_RULES:
@@ -153,8 +153,6 @@ class Endpoint(object):
 
             table.commit()
             table.autocommit = True
-        try:
-            pass
         except:
             result = False
 
