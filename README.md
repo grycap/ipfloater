@@ -50,7 +50,7 @@ $ iptables -I INPUT -d 216.58.211.227/32 -j DROP
 
 ```bash
 $ apt-get install python python-pip iptables
-$ pip install --upgrade python-iptables cpyutils
+$ pip install --upgrade python-iptables cpyutils bottle
 $ git clone https://github.com/dealfonso/ipfloater
 $ cd ipfloater
 $ python setup.py install --record installed-files.txt
