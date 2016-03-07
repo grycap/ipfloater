@@ -59,7 +59,7 @@ $ python setup.py install --record installed-files.txt
 Now you have to create a configuration file in /etc/ipfloater.conf. You can start from the /etc/default/ipfloater.conf file
 
 ```bash
-$ cp /etc/default/ipfloater.conf /etc/ipfloater.conf
+$ cp /etc/default/ipfloaterd.conf /etc/ipfloaterd.conf
 ```
 
 And you must edit the IP_POOL variable to set the comma separated pool of IP addresses.
