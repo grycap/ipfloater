@@ -36,6 +36,7 @@ def setup_basic_rules():
     chain_out = table.create_chain("ipfloater-OUTPUT")
     
     chain_input = table_filter.create_chain("ipfloater-INPUT")
+    chain_forward = table_filter.create_chain("ipfloater-FORWARD")
     
     # iptables -t nat -A POSTROUTING -m conntrack ! --ctstate DNAT -j ACCEPT
     rule_pos = iptc.Rule()
@@ -48,6 +49,7 @@ def setup_basic_rules():
     link_chains(table, "PREROUTING", "ipfloater-PREROUTING")
     link_chains(table, "OUTPUT", "ipfloater-OUTPUT")
     link_chains(table_filter, "INPUT", "ipfloater-INPUT")
+    link_chains(table_filter, "FORWARD", "ipfloater-FORWARD")
     table.commit()
     table.autocommit = True
     
@@ -88,10 +90,12 @@ def cleanup_rules():
     unlink_chains(table, "PREROUTING", "ipfloater-PREROUTING")
     unlink_chains(table, "OUTPUT", "ipfloater-OUTPUT")
     unlink_chains(table_filter, "INPUT", "ipfloater-INPUT")
+    unlink_chains(table_filter, "FORWARD", "ipfloater-FORWARD")
     delete_chain(table, "ipfloater-POSTROUTING")
     delete_chain(table, "ipfloater-PREROUTING")
     delete_chain(table, "ipfloater-OUTPUT")
     delete_chain(table_filter, "ipfloater-INPUT")
+    delete_chain(table_filter, "ipfloater-FORWARD")
     
     table.commit()
     table.autocommit = True
@@ -110,6 +114,13 @@ def block_ip(public_ip):
     
     chain_input = iptc.Chain(table_filter, "ipfloater-INPUT")
     chain_input.append_rule(rule_drop)
+
+    rule_accept = iptc.Rule()
+    rule_accept.create_target("ACCEPT")
+    rule_accept.dst = "%s/32" % public_ip
+
+    chain_forward = iptc.Chain(table_filter, "ipfloater-FORWARD")
+    chain_forward.append_rule(rule_accept)
 
     table_filter.commit()
     table_filter.autocommit = True
