@@ -43,13 +43,13 @@ def setup_basic_rules():
     rule_pos.create_target("ACCEPT")
     m = rule_pos.create_match("conntrack")
     m.ctstate = "!DNAT"
-    chain_pos.append_rule(rule_pos)
+    chain_pos.insert_rule(rule_pos)
         
-    link_chains(table, "POSTROUTING", "ipfloater-POSTROUTING")
-    link_chains(table, "PREROUTING", "ipfloater-PREROUTING")
-    link_chains(table, "OUTPUT", "ipfloater-OUTPUT")
-    link_chains(table_filter, "INPUT", "ipfloater-INPUT")
-    link_chains(table_filter, "FORWARD", "ipfloater-FORWARD")
+    link_chains(table, "POSTROUTING", "ipfloater-POSTROUTING", False)
+    link_chains(table, "PREROUTING", "ipfloater-PREROUTING", True)
+    link_chains(table, "OUTPUT", "ipfloater-OUTPUT", True)
+    link_chains(table_filter, "INPUT", "ipfloater-INPUT", True)
+    link_chains(table_filter, "FORWARD", "ipfloater-FORWARD", True)
     table.commit()
     table.autocommit = True
     
@@ -120,7 +120,7 @@ def block_ip(public_ip):
     rule_accept.dst = "%s/32" % public_ip
 
     chain_forward = iptc.Chain(table_filter, "ipfloater-FORWARD")
-    chain_forward.append_rule(rule_accept)
+    chain_forward.insert_rule(rule_accept)
 
     table_filter.commit()
     table_filter.autocommit = True
@@ -138,7 +138,7 @@ def delete_chain(table, chain_name):
             chain.delete_rule(rule)
         chain.delete()
 
-def link_chains(table, first_chain, second_chain):
+def link_chains(table, first_chain, second_chain, prepend = False):
     '''
     This function executes an iptables rule that links the chain named "first_chain" to the chain named "second_chain"
     in table "table". At the end, it creates a rule like: iptables -t table.name -A FIRST_CHAIN -j SECOND_CHAIN
@@ -146,7 +146,10 @@ def link_chains(table, first_chain, second_chain):
     rule = iptc.Rule()
     rule.target = rule.create_target(second_chain)
     chain = iptc.Chain(table, first_chain)
-    chain.append_rule(rule)
+    if prepend:
+        chain.insert_rule(rule)
+    else:
+        chain.append_rule(rule)
     
 def unlink_chains(table, first_chain, second_chain):
     '''
