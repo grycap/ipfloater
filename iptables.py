@@ -38,9 +38,9 @@ def setup_basic_rules():
     chain_input = table_filter.create_chain("ipfloater-INPUT")
     chain_forward = table_filter.create_chain("ipfloater-FORWARD")
     
-    # iptables -t nat -A POSTROUTING -m conntrack ! --ctstate DNAT -j ACCEPT
+    # iptables -t nat -A POSTROUTING -m conntrack ! --ctstate DNAT -j RETURN
     rule_pos = iptc.Rule()
-    rule_pos.create_target("ACCEPT")
+    rule_pos.create_target("RETURN")
     m = rule_pos.create_match("conntrack")
     m.ctstate = "!DNAT"
     chain_pos.insert_rule(rule_pos)
